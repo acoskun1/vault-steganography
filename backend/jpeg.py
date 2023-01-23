@@ -8,32 +8,32 @@ import numpy as np
 
 #Markers that are supported for JPEG
 supportedMarkers = {
-    0xffd8: 'Start of Image (SOI)',
-    0xffe0: 'JFIF segment marker (APP0)',
-    0xffe1: 'EXIF segment marker (APP1)',
-    0xffdb: 'Define Quantisation Table (DQT)',
-    0xffc0: 'Start of Frame (SOF)',
-    0xffc4: 'Define Huffman Table (DHT)',
-    0xffda: 'Start of Scan (SOS)',
-    0xffd9: 'End of Image (EOI)'
+    0xD8: 'Start of Image (SOI)',
+    0xE0: 'JFIF segment marker (APP0)',
+    0xE1: 'EXIF segment marker (APP1)',
+    0xDB: 'Define Quantisation Table (DQT)',
+    0xC0: 'Start of Frame (SOF)',
+    0xC4: 'Define Huffman Table (DHT)',
+    0xDA: 'Start of Scan (SOS)',
+    0xD9: 'End of Image (EOI)'
 }
 
 #Markers that are not supported for JPEG
 unsupportedMarkers = {
-    0xffc1: 'Extended Sequential DCT',
-    0xffc2: 'Progressive DCT',
-    0xffc3: 'Lossless',
-    0xffc5: 'Differential Sequential DCT',
-    0xffc6: 'Differential Progressive DCT',
-    0xffc7: 'Differential Lossless',
-    0xffc9: 'Extended Sequential DCT',
-    0xffca: 'Progressive DCT',
-    0xffcb: 'Lossless (Sequential)',
-    0xffcd: 'Differential Sequential DCT',
-    0xffce: 'Differential Progressive DCT',
-    0xffcf: 'Differential Lossless',
-    0xffcc: 'Arithmetic Coding',
-    0xff01: 'TEM Marker - Arithmetic Coding'
+    0xC1: 'Extended Sequential DCT',
+    0xC2: 'Progressive DCT',
+    0xC3: 'Lossless',
+    0xC5: 'Differential Sequential DCT',
+    0xC6: 'Differential Progressive DCT',
+    0xC7: 'Differential Lossless',
+    0xC9: 'Extended Sequential DCT',
+    0xCA: 'Progressive DCT',
+    0xCB: 'Lossless (Sequential)',
+    0xCD: 'Differential Sequential DCT',
+    0xCE: 'Differential Progressive DCT',
+    0xCF: 'Differential Lossless',
+    0xCC: 'Arithmetic Coding',
+    0x01: 'TEM Marker - Arithmetic Coding'
 }
 
 class Header:
@@ -134,11 +134,80 @@ class Header:
             raise Exception('Incorrect Start of Frame length.')
         self.startOfFrame.set = True
 
-    def addSOF(self):
-        pass
+    def addSOF(self, data: List[int]) -> None:
+        data.append(0xFF)
+        data.append(0xC0)
+        data.append(0x00)
+        
+        if self.startOfFrame.numOfComponents == 1:
+            data.append(0x0B)
+        else:
+            data.append(0x11)
+        
+        data.append(0x08)
+        data.append((self.startOfFrame.height >> 8) & 0xFF)
+        data.append((self.startOfFrame.height) & 0xFF)
+        data.append((self.startOfFrame.width >> 8) & 0xFF)
+        data.append((self.startOfFrame.width) & 0xFF)
+        data.append(self.startOfFrame.numOfComponents & 0xFF)
 
-    def readDHT(self,):
-        pass
+        for i in range(self.startOfFrame.numOfComponents):
+            c = (self.components[i].horizontalSamplingFactor & 0x0F) << 4
+            c = c | (self.components[i].verticalSamplingFactor & 0x0F)
+            data.append(self.components[i].identifier & 0xFF)
+
+            data.append(c)
+            data.append(self.components[i].quantizationTableNumber & 0xFF)
+
+    def readHT(self, data: List[int], start: int, length: int):
+        hufftable = None
+        curr = 0
+        i = start + 2
+
+        while i < (start + length):
+            curr = data[i]
+            if (curr >> 4) > 1:
+                raise ValueError('Error - Wrong Class')
+            
+            if (curr & 0x0F) > 1:
+                raise ValueError('Error- Wrong Destination')
+
+            if (curr >> 4) == 0:
+                hufftable = self.dcHuffmanTables[curr & 0x0F]
+            else:
+                hufftable = self.acHuffmanTables[curr & 0x0F]
+
+            if hufftable.set:
+                raise ValueError('Error - Multiple Huffman Tables')
+
+            total = 0
+            for j in range(1,17):
+                total += data[i+1]
+                hufftable.offsets[j] = total
+                i += 1
+
+            for j in range(total):
+                hufftable.symbols[j] = data[i+1]
+                i += 1
+            hufftable.set = True
+            self.getHuffmanCodes(hufftable)
+            i += 1
+
+    def readQT(self, data: List[int], start: int, length: int):
+        self.quantizationTables.append(0xFF)
+        self.quantizationTables.append(0xDB)
+
+        for i in range(start, length):
+            self.quantizationTables.append(data[i])
+
+    def readRI(self, data: List[int], start: int, length: int) -> None:
+        i  = start + 2
+
+        if length != 4:
+            raise ValueError('Error - Wrong length of Restart Interval Marker')
+        
+        self.restartInterval =  self.restartInterval
+        
 
 class StartOfFrame:
     def __init__(self) -> None:

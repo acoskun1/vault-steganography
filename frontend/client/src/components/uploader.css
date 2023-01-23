@@ -1,0 +1,15 @@
+.root {
+    background-color: #001E3C;
+    height: 100vh;
+  }
+  
+.image-uploader {
+    background-color: #007FFF;
+    padding: 20px;
+  }
+  
+.text-uploader {
+    background-color: #007FFF;
+    padding: 20px;
+  }
+  

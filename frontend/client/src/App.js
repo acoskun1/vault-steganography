@@ -1,11 +1,14 @@
-import React, {useState, useEffect} from "react";
+import React from 'react';
+import Uploader from './components/Uploader';
+import './App.css'
+
 
 function App() {
   return (
-    <div>
-
+    <div className='container'>
+      <Uploader />
     </div>
   )
 }
 
-export default App
+export default App;
