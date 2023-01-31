@@ -6,7 +6,7 @@ import os
 import sys
 import numpy as np
 
-#Markers that are supported for JPEG
+#Markers that are supported for JPEG/JFIF
 supportedMarkers = {
     0xD8: 'Start of Image (SOI)',
     0xE0: 'JFIF segment marker (APP0)',
@@ -15,10 +15,11 @@ supportedMarkers = {
     0xC0: 'Start of Frame (SOF)',
     0xC4: 'Define Huffman Table (DHT)',
     0xDA: 'Start of Scan (SOS)',
-    0xD9: 'End of Image (EOI)'
+    0xD9: 'End of Image (EOI)',
+    0xDD: 'Define Restart Interval (DRI)'
 }
 
-#Markers that are not supported for JPEG
+#Markers that are not supported for JPEG/JFIF
 unsupportedMarkers = {
     0xC1: 'Extended Sequential DCT',
     0xC2: 'Progressive DCT',
@@ -33,7 +34,10 @@ unsupportedMarkers = {
     0xCE: 'Differential Progressive DCT',
     0xCF: 'Differential Lossless',
     0xCC: 'Arithmetic Coding',
-    0x01: 'TEM Marker - Arithmetic Coding'
+    0x01: 'TEM Marker - Arithmetic Coding',
+    0xEF: 'APP15',
+    0xDC: 'Define Number of Lines - DNL',
+    0xDF: 'Expand Reference Component'
 }
 
 class Header:
@@ -47,7 +51,89 @@ class Header:
         self.restartInterval = 0
         self.quantizationTables = []
         self.app0Marker = []
+    
+    #done
+    def readHeader(self, data: List[int]) -> None:
 
+        """
+        Reads the byte in header and checks if byte is in supported/unsupported markers dictionary.
+        If byte in unsupportedMarkers, raise error.
+        If byte is supported, skip it.
+        """
+
+        #iterate through the data array and check if startOfScan attribute of the class has been set.
+        #if SOS set, bitstreamIdx is set to current index i and exit loop.
+        #finds the starting index of the bitstream in data array after SOS is found.
+        currByte = 0
+        for i in range(len(data)):
+            if self.startOfScan.set:
+                bitstreamIdx = i
+                break
+
+            currByte = data[i]
+            if currByte != 0xFF: #0xFF byte is a marker segment identifier, all marker segments begin with FF
+                continue
+
+            currByte = data[i+1]
+            if currByte == 0xFF or currByte == 0xD8 or currByte == 0xD9 or currByte == 0x01:
+                i += 1
+                continue
+                
+            markerLen = self.readMarkerLength(data, i+2)
+            marker = supportedMarkers.get(currByte)
+
+            if marker is None or marker in unsupportedMarkers:
+                raise Exception(f"Error: Unsupported marker ({hex(currByte)}) found in file.")
+            elif marker == 'Start of Frame (SOF)':
+                self.readSOF(data, i, markerLen)
+            elif marker == 'Start of Scan (SOS)':
+                self.readSOS(data, i, markerLen)
+            elif marker == 'Define Restart Interval (DRI)':
+                self.readDRI(data, i, markerLen)
+            elif marker == 'Define Huffman Table (DHT)':
+                self.readHT(data, i, markerLen)
+            elif marker == 'Define Quantisation Table (DQT)':
+                self.readQT(data, i, markerLen)
+            elif marker == 'JFIF segment marker (APP0)':
+                self.readAPP0(data, i, markerLen)
+
+        i += markerLen + 1
+
+    #done
+    def createHeaderByte(self, header: List[int]) -> None:
+
+        """
+        Adds markers to the header.
+        If APP0 marker has any size, adds APP0 (JFIF segment marker) to header array
+        Add StartOfFrame, HuffmanTables, QuantizationTable, StartOfScan
+        """
+        
+        #Add StartOfImage - SOI (FFD8)
+        header.append(0xFF)
+        header.append(0xD8)
+
+        if len(self.app0Marker) > 0:
+            self.writeAPP0(header)
+
+        self.writeSOF(header)
+        self.writeHT(header, 0, 0)
+        self.writeHT(header, 0, 1)
+        self.writeHT(header, 1, 0)
+        self.writeHT(header, 1, 1)
+        self.writeQT(header)
+        self.writeSOS(header)
+
+    #done - revisit
+    def readMarkerLength(self, data: List[int], start: int) -> int:
+        markerLen = 0
+        curr = start
+        markerLen = markerLen | data[curr]
+        curr += 1
+        markerLen = markerLen << 8
+        markerLen = markerLen | data[curr]
+        return markerLen
+
+    #done - revisit
     def readSOS(self, data: List[int], start: int, length: int) -> None:
         i = start + 2
         current = data[i]
@@ -70,7 +156,8 @@ class Header:
             raise Exception('Error - Number of bytes do not equal the length of marker.')
         self.startOfScan.set = True        
 
-    def addSOS(self, data: List[int]) -> None:
+    #done - revisit
+    def writeSOS(self, data: List[int]) -> None:
         data.append(0xFF)
         data.append(0xDA)
         data.append(0x00)
@@ -85,7 +172,8 @@ class Header:
         data.append(0x00)
         data.append(0x00)
         data.append(0x00)
-        
+
+    #done - revisit   
     def readSOF(self, data: List[int], start: int, length: int) -> None:
         i = start + 2
 
@@ -134,7 +222,8 @@ class Header:
             raise Exception('Incorrect Start of Frame length.')
         self.startOfFrame.set = True
 
-    def addSOF(self, data: List[int]) -> None:
+    #done - revisit
+    def writeSOF(self, data: List[int]) -> None:
         data.append(0xFF)
         data.append(0xC0)
         data.append(0x00)
@@ -159,6 +248,7 @@ class Header:
             data.append(c)
             data.append(self.components[i].quantizationTableNumber & 0xFF)
 
+    #done - revisit
     def readHT(self, data: List[int], start: int, length: int):
         hufftable = None
         curr = 0
@@ -193,6 +283,11 @@ class Header:
             self.getHuffmanCodes(hufftable)
             i += 1
 
+    #incomplete
+    def writeHT(self, header: List[int], table: int, id: int) -> None:
+        pass
+    
+    #revisit
     def readQT(self, data: List[int], start: int, length: int):
         self.quantizationTables.append(0xFF)
         self.quantizationTables.append(0xDB)
@@ -200,14 +295,26 @@ class Header:
         for i in range(start, length):
             self.quantizationTables.append(data[i])
 
-    def readRI(self, data: List[int], start: int, length: int) -> None:
+    #incomplete
+    def writeQT(self, data: List[int]) -> None:
+        pass
+
+    #incomplete
+    def readAPP0(self, data: List[int], start: int, length: int) -> None:
+        pass
+
+    #incomplete
+    def writeAPP0(self, header: List[int]) -> None:
+        pass
+    
+    #revisit
+    def readDRI(self, data: List[int], start: int, length: int) -> None:
         i  = start + 2
 
         if length != 4:
             raise ValueError('Error - Wrong length of Restart Interval Marker')
         
         self.restartInterval =  self.restartInterval
-        
 
 class StartOfFrame:
     def __init__(self) -> None:
@@ -245,7 +352,7 @@ class StartOfScan:
     def __init__(self) -> None:
         self.set = False
 
-class MCU:
+class MinimumCodedUnit:
     def __init__(self) -> None:
         self.luminance = [Channel() for i in range (4)]
         self.chrominance = [Channel() for i in range(2)]
@@ -253,7 +360,6 @@ class MCU:
 class JPG:
     def __init__(self, file):
         self.img_data = self.readJPG(file)
-
 
     #Input file JPG format validator.
     def readJPG(self, file):
