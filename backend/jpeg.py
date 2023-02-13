@@ -2,6 +2,9 @@
 
 from struct import unpack
 from typing import List
+
+#implement Reader class
+from reader import Reader
 import os
 import sys
 import numpy as np
@@ -51,6 +54,7 @@ class Header:
         self.restartInterval = 0
         self.quantizationTables = []
         self.app0Marker = []
+        self.zeroBased = False
     
     #done
     def readHeader(self, data: List[int]) -> None:
@@ -123,18 +127,35 @@ class Header:
         self.writeQT(header)
         self.writeSOS(header)
 
-    #done - revisit
+    #done
     def readMarkerLength(self, data: List[int], start: int) -> int:
+
+        """
+        Retrieves the length of marker by combining two bytes into a single integer that represents the length of the marker.
+        Does it by using bitwise OR operation twice (each for a byte).
+        """
+
         markerLen = 0
         curr = start
+
+        #store value of the first byte by using bitwise OR operation.
         markerLen = markerLen | data[curr]
         curr += 1
+
+        #shift markerLen by 8 bits to the left to make room for the next byte
+        #store value of next byte using bitwise OR operation
+        #return markerLen
         markerLen = markerLen << 8
         markerLen = markerLen | data[curr]
         return markerLen
 
-    #done - revisit
-    def readSOS(self, data: List[int], start: int, length: int) -> None:
+    #done
+    def readSOS(self, data: List[int], start: int, len: int) -> None:
+
+        """
+        Reads the StartOfScan marker in the header. 
+        """
+
         i = start + 2
         current = data[i]
 
@@ -152,62 +173,132 @@ class Header:
             i += 1
 
         i += 3
-        if i != start + length - 1:
+        if i != start + len - 1:
             raise Exception('Error - Number of bytes do not equal the length of marker.')
         self.startOfScan.set = True        
 
-    #done - revisit
-    def writeSOS(self, data: List[int]) -> None:
-        data.append(0xFF)
-        data.append(0xDA)
-        data.append(0x00)
-        data.append((6 + (2 * self.startOfFrame.numOfComponents)) & 0xff)
-        data.append(self.startOfFrame.numOfComponents)
+    #done
+    def writeSOS(self, header: List[int]) -> None:
 
-        for i in range(self.startOfFrame.numOfComponents):
-            data.append(self.components[i].identifier)
-            j = (self.components[i].dcHuffmanTableId << 4) | self.components[i].acHuffmanTableId
-            data.append(j & 0xff)
+        """
+        Adds StartOfScan marker to the header.
         
-        data.append(0x00)
-        data.append(0x00)
-        data.append(0x00)
+        + FF DA
+        + Length
+        + Number of Components in Scan
+        + For each component: componentID + HuffmanTable to use
+        + 3 bytes to be ignored.
 
-    #done - revisit   
-    def readSOF(self, data: List[int], start: int, length: int) -> None:
+        Result of calculation is cast to 8 bits by using the bitwise AND operation with 0xFF
+        """
+
+        #add marker FFDA
+        header.append(0xFF)
+        header.append(0xDA)
+
+        #add lenght - must be 6+2*(number of components in scan)
+        header.append(0x00)
+        header.append((6 + (2 * self.startOfFrame.numOfComponents)) & 0xFF)
+        
+        #add number of components in scan.
+        header.append(self.startOfFrame.numOfComponents)
+
+        #for each component add component id and huffmantable to use
+        for i in range(self.startOfFrame.numOfComponents):
+            header.append(self.components[i].identifier)
+            j = (self.components[i].dcHuffmanTableId << 4) | self.components[i].acHuffmanTableId
+            header.append(j & 0xff)
+        
+        #3 bytes to be ignored
+        header.append(0x00)
+        header.append(0x00)
+        header.append(0x00)
+
+    #done
+    def readSOF(self, data: List[int], start: int, len: int) -> None:
+
+        """
+        Reads StartOfFrame marker in the header.
+
+        + Length - 8+components*3
+        + Data precision (0x08) - 8 bits precision: stored in startOfFrame.
+        + Height and width of image: stored in startOfFrame.
+        + Number of components - for each component reads its identifier, sampling factors and quantization table number: stores all in components.
+        + Checks sampling factors of components are valid and raises an exception if not.
+        + Checks length of data read matches the expected length and raises exception if the do not match.
+        """
+
+        print('Reading Start Of Frame Marker ...')
+
         i = start + 2
 
+        #checks if the data precision is exactly 8 bits and raises exception if not.
+        #if precision is 8 bits, sets precision of startOfFrame object to data[i].
         if data[i] != 0x08:
             raise Exception('Invalid precision.')
         self.startOfFrame.precision = data[i]
         
-        #Image Height
+        #reading image height from data. 
+        #height is 2 bytes therefore shift by 8 bits twice
         self.startOfFrame.height = self.startOfFrame.height + (data[i+1] << 8)
         i += 1
         self.startOfFrame.height = self.startOfFrame.height + data[i+1]
         i += 1
+        
+        #checks if image width is 0. Image heigth cannot be 0 px.
+        if self.startOfFrame.height == 0:
+            raise Exception('Error - Image height is 0 px.')
 
-        #Image Width
+        #read image width from data
+        #width is 2 bytes therefore shit by 8 bits twice
         self.startOfFrame.width = self.startOfFrame.width + (data[i+1] << 8)
         i += 1
         self.startOfFrame.width = self.startOfFrame.width + data[i+1]
         i += 1
+        
+        #checks if image width is 0. An image width cannot be 0 px
+        if self.startOfFrame.width == 0:
+            raise Exception('Error - Image width is 0 px.')
 
+        #checks for making sure number of components are not 0, 4 or anything other than 1 and 3
+        #colour component IDs can be 1,2,3 so if 0 zeroBased is set to True.  
         i += 1
+        if data[i] == 0x00:
+            raise Exception('Error - Number of colour components cannot be zero.')
+
+        if data[i] == 0x04:
+            raise Exception('Error - CMYK colour mode is not supported.')
+
         if data[i] != 0x01 and data[i] != 0x03:
-            raise Exception('Invalid number of components.')
+            raise Exception('Error - Invalid number of components.')
         self.startOfFrame.numOfComponents = data[i]
 
-        for _ in range(self.startOfFrame.numOfComponents):
-            comp = self.components[_]
+        seen_ids = list()
+        for j in range(self.startOfFrame.numOfComponents):
+            comp = self.components[j]
             comp.identifier = data[i+1]
+
+            if comp.identifier == 0:
+                self.zeroBased = True
+            if self.zeroBased:
+                comp.identifier += 1
+
             i += 1
             comp.horizontalSamplingFactor = data[i+1] >> 4
             comp.verticalSamplingFactor = data[i+1] & 0x0F
             i += 1
             comp.quantizationTableNumber = data[i+1]
             i += 1
-        
+
+            if comp.identifier == 4 or comp.identifier == 5:
+                raise Exception(f'Error - YIQ colour mode is not supported. ComponentID: {comp.identifier}')
+            if comp.identifier == 0 or comp.identifier > 3:
+                raise Exception(f'Error - Invalid colour component. ComponentID: {comp.identifier}')
+            
+            if comp.identifier in seen_ids:
+                raise Exception(f'Error - Duplicate colour component ID: {comp.identifier}')
+            seen_ids.append(comp.identifier)
+
         if self.startOfFrame.numOfComponents > 1:
             if ((self.components[0].verticalSamplingFactor != 1 and self.components[0].verticalSamplingFactor != 2)
             or (self.components[0].horizontalSamplingFactor != 1 and self.components[0].horizontalSamplingFactor != 2)
@@ -218,12 +309,27 @@ class Header:
             self.components[0].verticalSamplingFactor = 1
             self.components[0].horizontalSamplingFactor = 1
             
-        if i != start + length - 1:
+        if i != start + len - 1:
             raise Exception('Incorrect Start of Frame length.')
         self.startOfFrame.set = True
 
-    #done - revisit
+    #done
     def writeSOF(self, data: List[int]) -> None:
+        
+        """
+        Adds StartOfFrame marker (SOF0)
+
+        + Pushes SOF0 marker by appending (0xFF, and 0xC0) into the data array.
+        + First byte of length of the marker segment (0x00).
+        + Depending on the number of components in the image, pushes back the second byte of the length marker
+            + (0x0B) for one componenet
+            + (0x11) for more than one component.
+        + Data precision (0x08)
+        + Height and width in two bytes each. Split into high and low bytes by shifting the value of height/width right by 8 bits and masking the result with 0xFF
+        + Number of components in the image
+        + Iterate through the components for the number of components, and pushes the identifier, sampling factors and quantization table number of the component.
+        """
+        
         data.append(0xFF)
         data.append(0xC0)
         data.append(0x00)
@@ -248,19 +354,19 @@ class Header:
             data.append(c)
             data.append(self.components[i].quantizationTableNumber & 0xFF)
 
-    #done - revisit
-    def readHT(self, data: List[int], start: int, length: int):
+    #done
+    def readHT(self, data: List[int], start: int, len: int):
         hufftable = None
         curr = 0
         i = start + 2
 
-        while i < (start + length):
+        while i < (start + len):
             curr = data[i]
             if (curr >> 4) > 1:
-                raise ValueError('Error - Wrong Class')
+                raise ValueError('Error - Wrong Huffman Table Class')
             
             if (curr & 0x0F) > 1:
-                raise ValueError('Error- Wrong Destination')
+                raise ValueError('Error- Wrong Huffman Table Destination Identifier')
 
             if (curr >> 4) == 0:
                 hufftable = self.dcHuffmanTables[curr & 0x0F]
@@ -283,38 +389,89 @@ class Header:
             self.getHuffmanCodes(hufftable)
             i += 1
 
-    #incomplete
+    #done - explain
     def writeHT(self, header: List[int], table: int, id: int) -> None:
+        
+        #Add Huffman Table marker bytes (FFC4)
+        header.append(0xFF)
+        header.append(0xC4)
+
+        header.append(0x00)
+        if table:
+            header.append(0xB5)
+        else:
+            header.append(0x1F)
+
+        i = table << 4
+        i = i | (table & 0x0F)
+        header.append(i)
+        if table:
+            huffTable = self.acHuffmanTables[id]
+        else:
+            huffTable = self.dcHuffmanTables[id]
+        
+        total = 0
+        for j in range(16):
+            codes = huffTable.offsets[i+1] - huffTable.offsets[i]
+            total += codes
+            header.append(codes & 0xFF)
+
+        for j in range(codes):
+            header.append(huffTable.symbols[i])
         pass
     
-    #revisit
-    def readQT(self, data: List[int], start: int, length: int):
+    #done
+    def readQT(self, data: List[int], start: int, len: int):
+
+        """
+        Reads Quantization Tables from a given file data and append it to an array named quantizationTables
+        """
+
+        #Adds the bytes of Quantization Table marker to quantizationTables.
         self.quantizationTables.append(0xFF)
         self.quantizationTables.append(0xDB)
 
-        for i in range(start, length):
+        for i in range(start, start + len):
             self.quantizationTables.append(data[i])
 
-    #incomplete
-    def writeQT(self, data: List[int]) -> None:
-        pass
+    #done
+    def writeQT(self, header: List[int]) -> None:
+        
+        """
+        Iterates over all elements in quantizationTables and appends each element to the header list. 
+        """
+        for i in self.quantizationTables:
+            header.append(i)
 
-    #incomplete
-    def readAPP0(self, data: List[int], start: int, length: int) -> None:
+    #incomplete - research and see are there other ways? Do we have to focus on APP0 only. APP1 is EXIF. 
+    def readAPP0(self, data: List[int], start: int, len: int) -> None:
         pass
 
     #incomplete
     def writeAPP0(self, header: List[int]) -> None:
         pass
     
-    #revisit
-    def readDRI(self, data: List[int], start: int, length: int) -> None:
-        i  = start + 2
-
-        if length != 4:
-            raise ValueError('Error - Wrong length of Restart Interval Marker')
+    #done - explain
+    def readDRI(self, data: List[int], start: int, len: int) -> None:
         
-        self.restartInterval =  self.restartInterval
+        """
+        Reads the Define Restart Interval Segment
+
+        + FFDD : marker
+        + 0004 : length - length must be 4
+        + XXXX : restart interval
+
+        Not all JPG files have restart intervals.
+        """
+        
+        print('Reading Restart Interval ...')
+
+        i  = start + 2
+        if len != 4:
+            raise ValueError('Error - Wrong length of Restart Interval Marker. Length is not 4.')
+        self.restartInterval = self.restartInterval | data[i]
+        self.restartInterval = self.restartInterval << 8
+        self.restartInterval = self.restartInterval | data[i + 1]
 
 class StartOfFrame:
     def __init__(self) -> None:
@@ -333,6 +490,7 @@ class Component:
         self.dcHuffmanTableId = 0
         self.verticalSamplingFactor = 0
         self.horizontalSamplingFactor = 0
+        self.used = False
 
 #Colour Channel Class
 class Channel:
@@ -358,8 +516,122 @@ class MinimumCodedUnit:
         self.chrominance = [Channel() for i in range(2)]
         
 class JPG:
+
     def __init__(self, file):
-        self.img_data = self.readJPG(file)
+        self.header = Header()
+        self.MCUVector = []
+        self.currMCU = 0
+        self.Channel = 0
+        self.ChannelType = True
+        self.Coefficient = 0
+        self.Bits = 0
+    
+    #done - document
+    def readBitstream(self, data: List[int]) -> None:
+
+        s = []
+        for i in range(self.header.bitstreamIndex, len(data)):
+            s.append(data[i])
+            if data[i] == 0xFF:
+                if data[i+1] == 0x00:
+                    i+=1
+            
+        bWidth = ((self.header.startOfFrame.width + 7) // 8)
+        bHeight = ((self.header.startOfFrame.height + 7) // 8)
+
+        if bWidth % 2 == 1 and self.header.components[0].horizontalSamplingFactor == 2:
+            bWidth += 1
+        
+        if bHeight % 2 == 1 and self.header.components[0].verticalSamplingFactor == 2:
+            bHeight += 1
+
+        blocks = bHeight * bWidth
+        noOfMCU = blocks // (self.header.components[0].verticalSamplingFactor * self.header.components[0].horizontalSamplingFactor)
+        finalDcCoeff = 0
+
+        bits = BitReader(s)
+
+        for i in range(noOfMCU):
+            mcu = MinimumCodedUnit()
+            if len(self.MCUVector) == 0:
+                finalDcCoeff = 0
+            finalDcCoeff = self.MCUVector[-1].chrominance[1].dcCoefficient
+
+            self.readNextMCU(mcu, bits, finalDcCoeff)
+            self.MCUVector.append(mcu)
+
+    #done - document, finalDcCoeff not used?
+    def readBlock(self, finalDcCoeff: int, channel: Channel, bit: Reader, dc: HuffmanTable, ac: HuffmanTable) -> None:
+
+        symbol = self.readNextSymbol(bit, dc)
+        coeffLen: int
+        coeffSigned: int
+        coeffUnsigned: int
+
+        if symbol == 0x00:
+            channel.dcCoeff = 0
+        else:
+            coeffLen = symbol & 0x0F
+            coeffUnsigned = bit.next(coeffLen)
+            if coeffUnsigned < pow(2, coeffLen - 1):
+                coeffSigned = coeffUnsigned - pow(2, coeffLen) + 1
+            else:
+                coeffSigned = int(coeffUnsigned)
+            channel.dcCoeff = coeffSigned
+        
+        coeffRead: int
+        while coeffRead < 63:
+            symbol = self.readNextSymbol(bit, ac)
+            if symbol == 0x00:
+                break
+            elif symbol == 0xF0:
+                coeffRead += 16
+                continue
+            else:
+                coeffLen = symbol & 0x0F
+                zeros = int((symbol >> 4) & 0x0F)
+                coeffRead += zeros
+                coeffUnsigned = b.next(coeffLen)
+                if coeffUnsigned < pow(2, coeffLen - 1):
+                    coeffSigned = coeffUnsigned - pow(2, coeffLen) + 1
+
+                else:
+                    coeffSigned = int(coeffUnsigned)
+                channel.acCoeff[coeffRead] = coeffSigned
+                coeffRead += 1
+
+                if coeffSigned != 0 and coeffSigned != 1:
+                    self.Bits += 1 
+
+    def BlockToBitstream(self) -> None:
+        pass
+
+    def extractFromJPG(self, secretMedium: List[int]) -> None:
+        pass
+
+    def newBitstream(self, stream: List[int]) -> None:
+        pass
+
+    def MCUtoBitstream(self) -> None:
+        pass
+
+    def resetCurr(self) -> None:
+        pass
+
+    def readNextSymbol(self) -> int:
+        pass
+
+    def getNextFreeCoeff(self) -> int:
+        i = self.getNextCoeff()
+        while i[0] == 0 or i[0] == 1:
+            i = self.getNextFreeCoeff()
+        return i
+
+    def getNextCoeff(self) -> int:
+        pass
+
+        #needs work
+        #self.img_data = self.readJPG(file)
 
     #Input file JPG format validator.
     def readJPG(self, file):
