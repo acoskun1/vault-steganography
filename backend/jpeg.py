@@ -4,7 +4,8 @@ from struct import unpack
 from typing import List
 
 #implement Reader class
-from reader import Reader
+from reader import BitReader
+from writer import BitWriter
 import os
 import sys
 import numpy as np
@@ -42,6 +43,79 @@ unsupportedMarkers = {
     0xDC: 'Define Number of Lines - DNL',
     0xDF: 'Expand Reference Component'
 }
+
+
+def loadJPEG(filename: str) -> List[int]:
+
+    if not os.path.exists(filename):
+        print(f'Error - {filename} file does not exist.')
+        return None
+
+    try:
+        with open(filename, 'rb') as f:
+            header = f.read(2)
+            marker = (header[0] << 8) + header[1]
+            unsigned_marker = (header[0] & 0xFF) * 256 + (header[1] & 0xFF)
+            if marker != 0xFFD8 and marker not in supportedMarkers:
+                print(unsigned_marker)
+                raise ValueError(f'Error - {filename} file is not a valid JPEG file.')
+            filedata = []
+            while True:
+                chunk_header = f.read(2)
+                if not chunk_header:
+                    break
+                chunk_size = (chunk_header[0] << 8) + chunk_header[1]
+                chunk_data = f.read(chunk_size-2)
+                chunk = chunk_header + chunk_data
+                filedata.extend(chunk)
+            
+            return filedata
+                        
+    except FileNotFoundError:
+        print(f'Error - Cannot open {filename} file.')
+        return None
+
+class StartOfFrame:
+    def __init__(self) -> None:
+        self.precision = 0
+        self.height = 0
+        self.width = 0
+        self.numOfComponents = 0x00
+        self.set = False
+
+#Component Class (Y'CbCr or Grayscale)
+class Component:
+    def __init__(self) -> None:
+        self.identifier = 0
+        self.quantizationTableNumber = 0
+        self.acHuffmanTableId = 0
+        self.dcHuffmanTableId = 0
+        self.verticalSamplingFactor = 0
+        self.horizontalSamplingFactor = 0
+        self.used = False
+
+#Colour Channel Class
+class Channel:
+    def __init__(self) -> None:
+        self.dcCoeff = 0            #DC coefficient of pixel block
+        self.acCoeff = [0] * 63     #AC coefficients of pixel block
+
+#Huffman Table Class (Multiple Tables in single JPEG)
+class HuffmanTable:
+    def __init__(self) -> None:
+        self.symbols = [0x00]*162
+        self.offsets = [0]*17
+        self.codes = [0]*162
+        self.set = False
+
+class StartOfScan:
+    def __init__(self) -> None:
+        self.set = False
+
+class MinimumCodedUnit:
+    def __init__(self) -> None:
+        self.luminance = [Channel() for i in range (4)]
+        self.chrominance = [Channel() for i in range(2)]   
 
 class Header:
     def __init__(self) -> None:
@@ -354,7 +428,7 @@ class Header:
             data.append(c)
             data.append(self.components[i].quantizationTableNumber & 0xFF)
 
-    #done
+    #done - getHuffmanCodes is not implemented
     def readHT(self, data: List[int], start: int, len: int):
         hufftable = None
         curr = 0
@@ -472,51 +546,8 @@ class Header:
         self.restartInterval = self.restartInterval | data[i]
         self.restartInterval = self.restartInterval << 8
         self.restartInterval = self.restartInterval | data[i + 1]
-
-class StartOfFrame:
-    def __init__(self) -> None:
-        self.precision = 0
-        self.height = 0
-        self.width = 0
-        self.numOfComponents = 0x00
-        self.set = False
-
-#Component Class (Y'CbCr or Grayscale)
-class Component:
-    def __init__(self) -> None:
-        self.identifier = 0
-        self.quantizationTableNumber = 0
-        self.acHuffmanTableId = 0
-        self.dcHuffmanTableId = 0
-        self.verticalSamplingFactor = 0
-        self.horizontalSamplingFactor = 0
-        self.used = False
-
-#Colour Channel Class
-class Channel:
-    def __init__(self) -> None:
-        self.dcCoeff = 0            #DC coefficient of pixel block
-        self.acCoeff = [0] * 63     #AC coefficients of pixel block
-
-#Huffman Table Class (Multiple Tables in single JPEG)
-class HuffmanTable:
-    def __init__(self) -> None:
-        self.symbols = [0x00]*162
-        self.offsets = [0]*17
-        self.codes = [0]*162
-        self.set = False
-
-class StartOfScan:
-    def __init__(self) -> None:
-        self.set = False
-
-class MinimumCodedUnit:
-    def __init__(self) -> None:
-        self.luminance = [Channel() for i in range (4)]
-        self.chrominance = [Channel() for i in range(2)]
         
 class JPG:
-
     def __init__(self, file):
         self.header = Header()
         self.MCUVector = []
@@ -525,6 +556,9 @@ class JPG:
         self.ChannelType = True
         self.Coefficient = 0
         self.Bits = 0
+        data = loadJPEG(file)
+        self.header.readHeader(data)
+        self.readBitstream(data)
     
     #done - document
     def readBitstream(self, data: List[int]) -> None:
@@ -561,7 +595,7 @@ class JPG:
             self.MCUVector.append(mcu)
 
     #done - document, finalDcCoeff not used?
-    def readBlock(self, finalDcCoeff: int, channel: Channel, bit: Reader, dc: HuffmanTable, ac: HuffmanTable) -> None:
+    def readBlock(self, finalDcCoeff: int, channel: Channel, bit: BitReader, dc: HuffmanTable, ac: HuffmanTable) -> None:
 
         symbol = self.readNextSymbol(bit, dc)
         coeffLen: int
@@ -633,20 +667,6 @@ class JPG:
         #needs work
         #self.img_data = self.readJPG(file)
 
-    #Input file JPG format validator.
-    def readJPG(self, file):
-        try:         
-            with open(file, 'rb') as f:
-                header = f.read(4)
-                marker, = unpack(">H", header[0:2])
-                if marker not in supportedMarkers:
-                    raise ValueError('Invalid JPEG file')
-                return f.read()
-        except FileNotFoundError:
-            print('Error - Cannot open input file.')
-            return None
-  
-
 if __name__ == "__main__":
     img = JPG('bolt.jpg')
-    print(img.img_data)
+    
