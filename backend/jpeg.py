@@ -233,7 +233,6 @@ class Header:
         print('Reading Start of Scan ...')
 
         #skips 4 bytes, (marker and length)
-        
         i = start + 4
         current = data[i]
 
@@ -244,17 +243,13 @@ class Header:
         for j in range(self.startOfFrame.numOfComponents):
             component = self.components[j]
             componentId = data[i+1]
-            # print(componentId)
             if componentId != component.identifier:
                 raise Exception('Error - Wrong Component ID in Start of Scan.')
-            component.dcHuffmanTableId = data[i+1] >> 4
             component.acHuffmanTableId = data[i+1] & 0x0F
-            print(componentId, component.dcHuffmanTableId, component.acHuffmanTableId)
-            i += 1
-
-            # print(i, (start + len -1))
-        i += 3
-        print(i)
+            component.dcHuffmanTableId = data[i] >> 4
+            i += 2
+            
+        i += 1
         if i != start + len - 1:
             raise Exception('Error - Number of bytes do not equal the length of marker.')
         self.startOfScan.set = True   
@@ -519,12 +514,16 @@ class Header:
         Reads Quantization Tables from a given file data and append it to an array named quantizationTables
         """
 
+        print('Reading Define Quantization Table')
+
         #Adds the bytes of Quantization Table marker to quantizationTables.
         self.quantizationTables.append(0xFF)
         self.quantizationTables.append(0xDB)
 
         for i in range(start, start + len):
             self.quantizationTables.append(data[i])
+
+        print('Done.')
 
     #done
     def writeQT(self, header: List[int]) -> None:
