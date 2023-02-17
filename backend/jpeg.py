@@ -230,7 +230,11 @@ class Header:
         Reads the StartOfScan marker in the header. 
         """
 
-        i = start + 2
+        print('Reading Start of Scan ...')
+
+        #skips 4 bytes, (marker and length)
+        
+        i = start + 4
         current = data[i]
 
         if current != self.startOfFrame.numOfComponents:
@@ -240,16 +244,21 @@ class Header:
         for j in range(self.startOfFrame.numOfComponents):
             component = self.components[j]
             componentId = data[i+1]
+            # print(componentId)
             if componentId != component.identifier:
                 raise Exception('Error - Wrong Component ID in Start of Scan.')
-            component.dcHuffmanTableId = data[i+2] >> 4
-            component.acHuffmanTableId = data[i+2] & 0x0F
+            component.dcHuffmanTableId = data[i+1] >> 4
+            component.acHuffmanTableId = data[i+1] & 0x0F
+            print(componentId, component.dcHuffmanTableId, component.acHuffmanTableId)
             i += 1
 
+            # print(i, (start + len -1))
         i += 3
+        print(i)
         if i != start + len - 1:
             raise Exception('Error - Number of bytes do not equal the length of marker.')
-        self.startOfScan.set = True        
+        self.startOfScan.set = True   
+        print('Done.')     
 
     #done
     def writeSOS(self, header: List[int]) -> None:
@@ -302,14 +311,14 @@ class Header:
         + Checks length of data read matches the expected length and raises exception if the do not match.
         """
 
-        print('Reading Start Of Frame Marker ...')
-
-        i = start + 2
+        print('Reading Start Of Frame ...')
+        i = start + 4
 
         #checks if the data precision is exactly 8 bits and raises exception if not.
         #if precision is 8 bits, sets precision of startOfFrame object to data[i].
         if data[i] != 0x08:
-            raise Exception('Invalid precision.')
+            print(data[i])
+            raise Exception('Invalid data precision.')
         self.startOfFrame.precision = data[i]
         
         #reading image height from data. 
@@ -382,10 +391,14 @@ class Header:
         else:
             self.components[0].verticalSamplingFactor = 1
             self.components[0].horizontalSamplingFactor = 1
-            
-        if i != start + len - 1:
+        
+        
+        if i != start + len + 1:
+            print(i)
             raise Exception('Incorrect Start of Frame length.')
         self.startOfFrame.set = True
+
+        print('Done.')
 
     #done
     def writeSOF(self, data: List[int]) -> None:
@@ -430,9 +443,12 @@ class Header:
 
     #done - getHuffmanCodes is not implemented
     def readHT(self, data: List[int], start: int, len: int):
+        
+        print('Reading Define Huffman Table ...')
+        
         hufftable = None
         curr = 0
-        i = start + 2
+        i = start + 4
 
         while i < (start + len):
             curr = data[i]
@@ -460,8 +476,10 @@ class Header:
                 hufftable.symbols[j] = data[i+1]
                 i += 1
             hufftable.set = True
-            self.getHuffmanCodes(hufftable)
+            getHuffmanCodes(hufftable)
             i += 1
+
+        print('Done.')
 
     #done - explain
     def writeHT(self, header: List[int], table: int, id: int) -> None:
@@ -538,7 +556,7 @@ class Header:
         Not all JPG files have restart intervals.
         """
         
-        print('Reading Restart Interval ...')
+        print('Reading Define Restart Interval ...')
 
         i  = start + 2
         if len != 4:
@@ -546,6 +564,8 @@ class Header:
         self.restartInterval = self.restartInterval | data[i]
         self.restartInterval = self.restartInterval << 8
         self.restartInterval = self.restartInterval | data[i + 1]
+
+        print('Done.')
         
 class JPG:
     def __init__(self, file):
@@ -666,6 +686,14 @@ class JPG:
 
         #needs work
         #self.img_data = self.readJPG(file)
+
+def getHuffmanCodes(huffmanTable: HuffmanTable) -> None:
+    code = 0
+    for offset in range(16):
+        for i in range(huffmanTable.offsets[offset], huffmanTable.offsets[offset + 1]):
+            huffmanTable.codes[i] = code
+            code += 1
+        code = code << 1
 
 if __name__ == "__main__":
     img = JPG('bolt.jpg')
