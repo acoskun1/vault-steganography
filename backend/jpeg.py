@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 from struct import unpack
-from typing import List
+from typing import List, Dict
 
 #implement Reader class
 from reader import BitReader
@@ -9,6 +9,7 @@ from writer import BitWriter
 import os
 import sys
 import numpy as np
+
 
 #Markers that are supported for JPEG/JFIF
 supportedMarkers = {
@@ -43,7 +44,6 @@ unsupportedMarkers = {
     0xDC: 'Define Number of Lines - DNL',
     0xDF: 'Expand Reference Component'
 }
-
 
 def loadJPEG(filename: str) -> List[int]:
 
@@ -110,7 +110,7 @@ class HuffmanTable:
 
 class StartOfScan:
     def __init__(self) -> None:
-        self.set = False
+        self.set: bool = False
 
 class MinimumCodedUnit:
     def __init__(self) -> None:
@@ -122,13 +122,16 @@ class Header:
         self.startOfFrame = StartOfFrame()
         self.startOfScan = StartOfScan()
         self.components = [Component() for i in range(3)] #list comprehension - creating new Component object on each iteration and appends to the list (Y'CbCr)
-        self.dcHuffmanTables = [HuffmanTable() for i in range(2)]
-        self.acHuffmanTables = [HuffmanTable() for i in range(2)]
+        self.dcHuffmanTables: List[HuffmanTable] = [HuffmanTable() for i in range(len(self.components))]
+        self.acHuffmanTables: List[HuffmanTable] = [HuffmanTable() for i in range(len(self.components))]
+        
+        # self.dcHuffmanTables = [HuffmanTable() for i in range(2)]
+        # self.acHuffmanTables = [HuffmanTable() for i in range(2)]
         self.bitstreamIndex = 0
         self.restartInterval = 0
         self.quantizationTables = []
         self.app0Marker = []
-        self.zeroBased = False
+        self.zeroBased: bool = False
     
     #done
     def readHeader(self, data: List[int]) -> None:
@@ -241,11 +244,12 @@ class Header:
         
         componentId = None
         for j in range(self.startOfFrame.numOfComponents):
+            print(j)
             component = self.components[j]
             componentId = data[i+1]
             if componentId != component.identifier:
                 raise Exception('Error - Wrong Component ID in Start of Scan.')
-            component.acHuffmanTableId = data[i+1] & 0x0F
+            component.acHuffmanTableId = data[i + 2] & 0x0F
             component.dcHuffmanTableId = data[i] >> 4
             i += 2
             
@@ -393,7 +397,10 @@ class Header:
             raise Exception('Incorrect Start of Frame length.')
         self.startOfFrame.set = True
 
-        print('Done.')
+        print(f'Precision: {self.startOfFrame.precision}\nImage Size: {self.startOfFrame.width} x {self.startOfFrame.height}\nNumber of Image Components: {self.startOfFrame.numOfComponents}')
+        for component in self.components:
+            print(f'    Component ID: {component.identifier}, Quantisation Table ID: {component.quantizationTableNumber}')
+        print('\nDone.\n-----------------------------------------------')
 
     #done
     def writeSOF(self, data: List[int]) -> None:
@@ -436,7 +443,7 @@ class Header:
             data.append(c)
             data.append(self.components[i].quantizationTableNumber & 0xFF)
 
-    #done - getHuffmanCodes is not implemented
+    #done
     def readHT(self, data: List[int], start: int, len: int):
         
         print('Reading Define Huffman Table ...')
@@ -523,7 +530,9 @@ class Header:
         for i in range(start, start + len):
             self.quantizationTables.append(data[i])
 
-        print('Done.')
+        
+        print(self.quantizationTables)
+        print('\nDone.\n-----------------------------------------------')
 
     #done
     def writeQT(self, header: List[int]) -> None:
@@ -569,7 +578,7 @@ class Header:
 class JPG:
     def __init__(self, file):
         self.header = Header()
-        self.MCUVector = []
+        self.MCUVector: List[MinimumCodedUnit] = []
         self.currMCU = 0
         self.Channel = 0
         self.ChannelType = True
@@ -608,31 +617,32 @@ class JPG:
             mcu = MinimumCodedUnit()
             if len(self.MCUVector) == 0:
                 finalDcCoeff = 0
-            finalDcCoeff = self.MCUVector[-1].chrominance[1].dcCoefficient
+            else:
+                finalDcCoeff = self.MCUVector[-1].chrominance[1].dcCoeff
 
             self.readNextMCU(mcu, bits, finalDcCoeff)
             self.MCUVector.append(mcu)
 
     #done - document, finalDcCoeff not used?
-    def readBlock(self, finalDcCoeff: int, channel: Channel, bit: BitReader, dc: HuffmanTable, ac: HuffmanTable) -> None:
+    def readBlock(self, channel: Channel, bit: BitReader, finalDcCoeff: int, dc: HuffmanTable, ac: HuffmanTable) -> None:
 
         symbol = self.readNextSymbol(bit, dc)
-        coeffLen: int
-        coeffSigned: int
-        coeffUnsigned: int
+        coeffLen: int = 0
+        coeffSigned: int = 0
+        coeffUnsigned: int = 0
 
         if symbol == 0x00:
             channel.dcCoeff = 0
         else:
             coeffLen = symbol & 0x0F
-            coeffUnsigned = bit.next(coeffLen)
+            coeffUnsigned = bit.readNextBits(coeffLen)
             if coeffUnsigned < pow(2, coeffLen - 1):
                 coeffSigned = coeffUnsigned - pow(2, coeffLen) + 1
             else:
                 coeffSigned = int(coeffUnsigned)
             channel.dcCoeff = coeffSigned
         
-        coeffRead: int
+        coeffRead: int = 0
         while coeffRead < 63:
             symbol = self.readNextSymbol(bit, ac)
             if symbol == 0x00:
@@ -644,7 +654,7 @@ class JPG:
                 coeffLen = symbol & 0x0F
                 zeros = int((symbol >> 4) & 0x0F)
                 coeffRead += zeros
-                coeffUnsigned = b.next(coeffLen)
+                coeffUnsigned = bit.readNextBits(coeffLen)
                 if coeffUnsigned < pow(2, coeffLen - 1):
                     coeffSigned = coeffUnsigned - pow(2, coeffLen) + 1
 
@@ -671,8 +681,26 @@ class JPG:
     def resetCurr(self) -> None:
         pass
 
-    def readNextSymbol(self) -> int:
-        pass
+    def readNextSymbol(self, bits: BitReader, huffmanTable: HuffmanTable) -> int:
+        code: int = 0
+        codeIdx: int = 0
+        codeFound: bool = False
+        codeLen: int = 1
+
+        while(codeLen <= 16 and not codeFound):
+            code = code << 1
+            code = code | (bits.readNextBits() & 0x01)
+            start = huffmanTable.offsets[codeLen -1]
+            mask = (1 << codeLen) - 1
+            for i in range(start, huffmanTable.offsets[codeLen]):
+                if(code & mask) == (huffmanTable.codes[i] & mask):                    
+                    codeFound = True
+                    codeIdx = i
+                    break
+            if not codeFound:
+                codeLen += 1
+        
+        return huffmanTable.symbols[codeIdx]
 
     def getNextFreeCoeff(self) -> int:
         i = self.getNextCoeff()
@@ -685,6 +713,23 @@ class JPG:
 
         #needs work
         #self.img_data = self.readJPG(file)
+
+    def readNextMCU(self, mcu: MinimumCodedUnit, bit: BitReader, finalDcCoeff: int) -> None:
+        #could add number of components check.
+        luminanceBlocks = self.header.components[0].horizontalSamplingFactor * self.header.components[0].verticalSamplingFactor
+
+        for i in range(luminanceBlocks):
+            self.readBlock(mcu.luminance[i], bit, finalDcCoeff, self.header.dcHuffmanTables[self.header.components[0].dcHuffmanTableId], self.header.acHuffmanTables[self.header.components[0].acHuffmanTableId])
+            finalDcCoeff = mcu.luminance[i].dcCoeff
+
+        if self.header.startOfFrame.numOfComponents > 1:
+            self.readBlock(mcu.chrominance[0], bit, finalDcCoeff, self.header.dcHuffmanTables[self.header.components[1].dcHuffmanTableId], self.header.acHuffmanTables[self.header.components[1].acHuffmanTableId])
+            finalDcCoeff = mcu.chrominance[0].dcCoeff
+
+            # print(self.header.dcHuffmanTables[self.header.components[2].dcHuffmanTableId])
+            # print(self.header.acHuffmanTables[self.header.components[2].acHuffmanTableId])
+
+            self.readBlock(mcu.chrominance[1], bit, finalDcCoeff, self.header.dcHuffmanTables[self.header.components[2].dcHuffmanTableId], self.header.acHuffmanTables[self.header.components[2].acHuffmanTableId])
 
 def getHuffmanCodes(huffmanTable: HuffmanTable) -> None:
     code = 0
