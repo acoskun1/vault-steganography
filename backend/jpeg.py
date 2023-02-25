@@ -456,30 +456,35 @@ class Header:
         A single DHT segment may contain multiple Huffman Tables, each with its own information byte.
         FFC4: Marker (2)
         XXXX: Length (2)
-        YY: HT information (1 byte): Lower and Upper nibble technique
-
-
-        
+        YY: Table information (1 byte): Lower (L) and Upper (U) nibble
+            U: 0 | 1, 0: DC huffman table, 1: AC huffman table
+            L: 0 - 3, table id. 
+        [16]: Number of symbols with codes of that length 1-16 (16)
+        [X]: Table containing the symbols in order of increasing code length. 
+             (x = total number of codes)
         """
         
         print('Reading Define Huffman Table ...')
         
         hufftable = None
-        curr = 0
         i = start + 4
-
+        tableInfo = data[i]
+        tableType = (tableInfo >> 4)
+        tableID = (tableInfo & 0x0F)
+        
         while i < (start + len):
-            curr = data[i]
-            if (curr >> 4) > 1:
-                raise ValueError('Error - Wrong Huffman Table Class')
             
-            if (curr & 0x0F) > 1:
+            #Checking upper nibble
+            if (tableType) > 1:
+                raise ValueError('Error - Wrong Huffman table class. Not AC or DC.')
+            
+            if (tableID) > 3:
                 raise ValueError('Error- Wrong Huffman Table Destination Identifier')
 
-            if (curr >> 4) == 0:
-                hufftable = self.dcHuffmanTables[curr & 0x0F]
+            if (tableType) == 0:
+                hufftable = self.dcHuffmanTables[tableID]
             else:
-                hufftable = self.acHuffmanTables[curr & 0x0F]
+                hufftable = self.acHuffmanTables[tableID]
 
             if hufftable.set:
                 raise ValueError('Error - Multiple Huffman Tables')
@@ -497,8 +502,10 @@ class Header:
             getHuffmanCodes(hufftable)
             i += 1
 
-        print('Done.')
+            print(f'Huffman table length: {len}\nDestination ID: {tableID}\nClass: {tableType}\nTotal number of codes: {total}')
+            print(hufftable.offsets)
 
+        print('\nDone.\n-----------------------------------------------')
     #done - explain
     def writeHT(self, header: List[int], table: int, id: int) -> None:
         
