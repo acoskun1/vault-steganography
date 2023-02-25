@@ -16,7 +16,7 @@ supportedMarkers = {
     0xD8: 'Start of Image (SOI)',
     0xE0: 'JFIF segment marker (APP0)',
     0xE1: 'EXIF segment marker (APP1)',
-    0xDB: 'Define Quantisation Table (DQT)',
+    0xDB: 'Define Quantization Table (DQT)',
     0xC0: 'Start of Frame (SOF)',
     0xC4: 'Define Huffman Table (DHT)',
     0xDA: 'Start of Scan (SOS)',
@@ -94,6 +94,14 @@ class Component:
         self.horizontalSamplingFactor = 0
         self.used = False
 
+class QuantizationTable:
+    def __init__(self, len: int, precision: int, dest_id: int) -> None:
+        self.table: List[int] = [0] * 64
+        self.length = len
+        self.precision = precision
+        self.dest_id = dest_id
+        self.set: bool = False
+
 #Colour Channel Class
 class Channel:
     def __init__(self) -> None:
@@ -121,15 +129,12 @@ class Header:
     def __init__(self) -> None:
         self.startOfFrame = StartOfFrame()
         self.startOfScan = StartOfScan()
-        self.components = [Component() for i in range(3)] #list comprehension - creating new Component object on each iteration and appends to the list (Y'CbCr)
+        self.components: List[Component] = [Component() for i in range(3)] #list comprehension - creating new Component object on each iteration and appends to the list (Y'CbCr)
         self.dcHuffmanTables: List[HuffmanTable] = [HuffmanTable() for i in range(len(self.components))]
         self.acHuffmanTables: List[HuffmanTable] = [HuffmanTable() for i in range(len(self.components))]
-        
-        # self.dcHuffmanTables = [HuffmanTable() for i in range(2)]
-        # self.acHuffmanTables = [HuffmanTable() for i in range(2)]
         self.bitstreamIndex = 0
         self.restartInterval = 0
-        self.quantizationTables = []
+        self.quantizationTables: List[QuantizationTable] = []
         self.app0Marker = []
         self.zeroBased: bool = False
     
@@ -173,13 +178,13 @@ class Header:
                 self.readDRI(data, i, markerLen)
             elif marker == 'Define Huffman Table (DHT)':
                 self.readHT(data, i, markerLen)
-            elif marker == 'Define Quantisation Table (DQT)':
+            elif marker == 'Define Quantization Table (DQT)':
                 self.readQT(data, i, markerLen)
             elif marker == 'JFIF segment marker (APP0)':
                 self.readAPP0(data, i, markerLen)
 
         i += markerLen + 1
-
+            
     #done
     def createHeaderByte(self, header: List[int]) -> None:
 
@@ -310,7 +315,7 @@ class Header:
         + Checks length of data read matches the expected length and raises exception if the do not match.
         """
 
-        print('Reading Start Of Frame ...')
+        print('Reading Start Of Frame (SOF0) ...')
         i = start + 4
 
         #checks if the data precision is exactly 8 bits and raises exception if not.
@@ -397,6 +402,7 @@ class Header:
             raise Exception('Incorrect Start of Frame length.')
         self.startOfFrame.set = True
 
+        #printing area
         print(f'Precision: {self.startOfFrame.precision}\nImage Size: {self.startOfFrame.width} x {self.startOfFrame.height}\nNumber of Image Components: {self.startOfFrame.numOfComponents}')
         for component in self.components:
             print(f'    Component ID: {component.identifier}, Quantisation Table ID: {component.quantizationTableNumber}')
@@ -445,6 +451,16 @@ class Header:
 
     #done
     def readHT(self, data: List[int], start: int, len: int):
+
+        """
+        A single DHT segment may contain multiple Huffman Tables, each with its own information byte.
+        FFC4: Marker (2)
+        XXXX: Length (2)
+        YY: HT information (1 byte): Lower and Upper nibble technique
+
+
+        
+        """
         
         print('Reading Define Huffman Table ...')
         
@@ -520,19 +536,33 @@ class Header:
         """
         Reads Quantization Tables from a given file data and append it to an array named quantizationTables
         """
+        print('Reading Define Quantization Table (FFDB) ...')
 
-        print('Reading Define Quantization Table')
+        length = data[start + 3]
+        tableID = data[start + 4] & 0x0F
 
-        #Adds the bytes of Quantization Table marker to quantizationTables.
-        self.quantizationTables.append(0xFF)
-        self.quantizationTables.append(0xDB)
-
-        for i in range(start, start + len):
-            self.quantizationTables.append(data[i])
-
+        if tableID > 3:
+            raise Exception(f'Error - Invalid quantization table ID: {tableID}')
         
-        print(self.quantizationTables)
-        print('\nDone.\n-----------------------------------------------')
+        #precision = 16 bits
+        if data[start + 4] >> 4 != 0:
+            precision = 16
+            qtable = QuantizationTable(length, precision, tableID)
+            for i in range(start, start + len + 2):
+                qtable.table[i - start - 5] = data[i]
+            self.quantizationTables.append(qtable)
+        #precision = 8 bits
+        else:
+            precision = 8
+            qtable = QuantizationTable(length, precision, tableID)
+            for i in range(start, start + len + 2):
+                qtable.table[i - start - 5] = data[i]
+
+            self.quantizationTables.append(qtable)
+
+        for qt in self.quantizationTables:
+            print(f'Table Length: {qt.length}\nPrecision: {qt.precision} bits\nDestination ID: {qt.dest_id}\n    {qt.table}\n')
+        print('Done.\n-----------------------------------------------')
 
     #done
     def writeQT(self, header: List[int]) -> None:
@@ -553,27 +583,23 @@ class Header:
     
     #done - explain
     def readDRI(self, data: List[int], start: int, len: int) -> None:
-        
         """
         Reads the Define Restart Interval Segment
-
         + FFDD : marker
         + 0004 : length - length must be 4
         + XXXX : restart interval
-
         Not all JPG files have restart intervals.
         """
-        
         print('Reading Define Restart Interval ...')
-
-        i  = start + 2
+        i  = start + 4
         if len != 4:
             raise ValueError('Error - Wrong length of Restart Interval Marker. Length is not 4.')
         self.restartInterval = self.restartInterval | data[i]
         self.restartInterval = self.restartInterval << 8
         self.restartInterval = self.restartInterval | data[i + 1]
 
-        print('Done.')
+        print(f'Restart Interval: {self.restartInterval}\nLength: {len}')
+        print('\nDone.\n-----------------------------------------------')
         
 class JPG:
     def __init__(self, file):
@@ -740,5 +766,5 @@ def getHuffmanCodes(huffmanTable: HuffmanTable) -> None:
         code = code << 1
 
 if __name__ == "__main__":
-    img = JPG('bolt.jpg')
+    img = JPG('bird.jpg')
     
