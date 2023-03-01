@@ -18,16 +18,17 @@ parser.add_argument('text_file', metavar='text', type=str, nargs='?', help='Path
 # Parse the command line arguments
 args = parser.parse_args()
 
-# Check if the image file exists
-if not os.path.isfile(args.image_file):
-    parser.error(f"File not found: {args.image_file}")
+print(args)
+# # Check if the image file exists
+# if not os.path.isfile(args.image_file):
+#     parser.error(f"File not found: {args.image_file}")
 
-# Check if the text file exists (only for --embed)
-if args.embed and not os.path.isfile(args.text_file):
-    parser.error(f"File not found: {args.text_file}")
+# # Check if the text file exists (only for --embed)
+# if args.embed and not os.path.isfile(args.text_file):
+#     parser.error(f"File not found: {args.text_file}")
 
-# Print the chosen operation and file paths
-if args.embed:
-    print(f"Embedding text in image {args.image_file} using text file {args.text_file}")
-else:
-    print(f"Recovering text from image {args.image_file}")
+# # Print the chosen operation and file paths
+# if args.embed:
+#     print(f"Embedding text in image {args.image_file} using text file {args.text_file}")
+# else:
+#     print(f"Recovering text from image {args.image_file}")
