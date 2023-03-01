@@ -7,14 +7,12 @@ JPG images consist of an header and a bitstream. The header contains metadata ab
 Precisely, the header includes marker segments. Each marker segment contains information specific about JPG components.
 
  ## Components of Vault:
-------------------------------------------------------------------------
 + jpeg.py: implements reading from image and writing into image
 + parser.py: implements command line argument parser
 + reader.py: implements reading individual bits from binary data
 + writer.py: implements writing individual bits from binary data
 
 ## Command Line Argument Usage:
-------------------------------------------------------------------------
 Options:
 + --embed: hides text into image (mutually exclusive)
 + --recover: extracts text from image (mutually exclusive)
