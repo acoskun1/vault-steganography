@@ -10,6 +10,8 @@ Precisely, the header includes marker segments. Each marker segment contains inf
 + jpeg.py: implements reading from image and writing into image
 + parser.py: implements command line argument parser
 + reader.py: implements reading individual bits from binary data
++ steg.py: implements steganography
++ vault.py: implements command line argument parser
 + writer.py: implements writing individual bits from binary data
 
 ## Command Line Argument Usage:

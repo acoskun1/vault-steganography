@@ -2,19 +2,19 @@ import argparse
 import os
 
 # Create the argument parser
-parser = argparse.ArgumentParser(description='Steganography tool for embedding or recovering text from an image')
+parser = argparse.ArgumentParser(prog='vault', allow_abbrev=False, description='Steganography tool for embedding or recovering text from an image', epilog='Thanks for using %(prog)s.')
 
 # Add the mutually exclusive options
 group = parser.add_mutually_exclusive_group(required=True)
-group.add_argument('--embed', action='store_true', help='Embed text in the image')
-group.add_argument('--recover', action='store_true', help='Recover text from the image')
+group.add_argument('-e','--embed', action='store_true', help='embed text into image')
+group.add_argument('-r','--recover', action='store_true', help='retrieve text from image')
 
 # Add the image file option
-parser.add_argument('image_file', metavar='image', type=str, help='Path to the image file')
+parser.add_argument('image_file', action='store' ,metavar='image', type=str, help='Path to the image file')
 
 # Add the text file option (only for --embed)
-parser.add_argument('text_file', metavar='text', type=str, nargs='?', help='Path to the text file (only for --embed)')
-
+parser.add_argument('text_file', action='store',metavar='text', type=str, nargs='?', help='Path to the text file (only for --embed)')
+parser.add_argument()
 # Parse the command line arguments
 args = parser.parse_args()
 
