@@ -2,3 +2,4 @@ env/
 backend/bolt.jpg
 backend/bird.jpg
 backend/__pycache__
+backend/test.txt
