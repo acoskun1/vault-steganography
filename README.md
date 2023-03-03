@@ -20,8 +20,9 @@ Options:
 + --recover: extracts text from image (mutually exclusive)
 
 Positional Arguments:
-+ image: path of the image file
-+ text: path of the text file
++ cover image: path to the image file
++ text file: path to the text file
++ stego image: path to stego image 
 
 To be developed:
 + JSteg or F5 Steganographic algorithm (embedding and retrieval)
