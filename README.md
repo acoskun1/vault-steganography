@@ -27,3 +27,4 @@ Positional Arguments:
 To be developed:
 + JSteg or F5 Steganographic algorithm (embedding and retrieval)
 + Stego key for the encryption of secret text inside the image
++ Use logging instead of printing outputs.
