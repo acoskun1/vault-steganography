@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from struct import unpack
 from typing import List, Dict
 
@@ -52,7 +50,7 @@ def loadJPEG(filename: str) -> List[int]:
         return None
 
     try:
-        with open(filename, 'rb') as f:
+        with open(filename, 'rb+') as f:
             header = f.read(2)
             marker = (header[0] << 8) + header[1]
             unsigned_marker = (header[0] & 0xFF) * 256 + (header[1] & 0xFF)
@@ -772,6 +770,6 @@ def getHuffmanCodes(huffmanTable: HuffmanTable) -> None:
             code += 1
         code = code << 1
 
-if __name__ == "__main__":
-    img = JPG('bird.jpg')
+# if __name__ == "__main__":
+#     img = JPG('bird.jpg')
     

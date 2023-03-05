@@ -1,7 +1,10 @@
+#!/usr/bin/env python3
+from jpeg import JPG, loadJPEG
 from datetime import datetime
 from dateutil import tz
 import argparse
 import os
+
 
 class CustomHelpFormatter(argparse.HelpFormatter):
     def __init__(self, prog: str, indent_increment: int = 2, max_help_position: int = 24, width: int | None = None) -> None:
@@ -23,11 +26,11 @@ Vault.© 2023 By Ali Coskun
 
 def get_epilog() -> str:
     _exec_at = datetime.now(tz=tz.UTC)
-    _epilog_string = f'Executed at: {_exec_at:%m/%d/%Y - %H:%M:%S, %Z%z}'
+    _epilog_string = f'Last executed at: {_exec_at:%m/%d/%Y - %H:%M:%S, %Z%z}'
     return _epilog_string
 
 parser = argparse.ArgumentParser(prog='vault', 
-                                 allow_abbrev=False, 
+                                 allow_abbrev=False,
                                  usage='%(prog)s [options] <path_to_cover_image> <path_to_text_file> <path_to_stego_image>', 
                                  description='Steganography tool for embedding or recovering secret text from/into a JPG image.', 
                                  formatter_class=CustomHelpFormatter,
@@ -44,31 +47,60 @@ parser.add_argument('stego_image', action='store',metavar='STEGO IMAGE', type=st
 args = parser.parse_args()
 print(args)
 
-# retrieve mode checks
-if args.retrieve:
-    if args.stego_image is None:
-        parser.error('Path to stego image not specified.')
-    elif not os.path.isfile(args.stego_image):
-        parser.error(f'Stego image file cannot be located at:\n\n    {args.stego_image}\n')
+if __name__ == "__main__":
+    # retrieve mode checks
+    if args.retrieve == True:
+        if args.stego_image is None:
+            parser.error('Path to stego image not specified. Please specify the path of stego image.')
+        elif not os.path.exists(os.path.dirname(args.stego_image)):
+            parser.error(f'Path to stego image directory does not exist:\n\n    {os.path.dirname(args.stego_image)}\n\nPlease specify a valid path or directory.')
+        elif not os.path.isfile(args.stego_image):
+            parser.error(f'Stego image file cannot be located at:\n\n    {args.stego_image}\n\nPlease specify a valid path or stego image.')
+        
+        elif args.text_file is None:
+            parser.error(f'Path to extract text file is not specified. Please specify the path to which text file will be saved.')
+        elif not os.path.exists(os.path.dirname(args.text_file)):
+            parser.error(f'Path to extract text file does not exist: {os.path.dirname(args.text_file)}')
+        elif os.path.isfile(args.text_file):
+            parser.error('Text file already exists. Cannot overwrite, please specify a different name or path.')
 
-# embed mode checks
-if args.embed:
-    if args.cover_image is None:
-        parser.error('Path to cover image is not specified.')
-    elif args.text_file is None:
-        parser.error('Path to text file is not specified.')
-    elif args.stego_image is None:
-        parser.error('Path to stego image is not specified.')
-    elif not os.path.isfile(args.text_file):
-        parser.error(f"Text file cannot be located at:\n\n    {args.text_file}")
-    elif not os.path.isfile(args.cover_image):
-        parser.error(f"Cover image file cannot be located at:\n\n    {args.cover_image[0]}")
-    elif os.path.isfile(args.stego_image):
-        parser.error('File already exists, please choose a different directory, or name.')
+        elif args.cover_image is None:
+            parser.error('Path to extract image file is not specified. Please specify the path to which cover image will be saved.')
+        elif not os.path.exists(os.path.dirname(args.cover_image)):
+            parser.error(f'Path to extract image file does not exist:\n\n   {os.path.dirname(args.cover_image)}\n')
+        elif os.path.isfile(args.cover_image):
+            parser.error(f'Image file already exists, please specify a different path or name')
+        else:
+            print(f"Recovering text from image {args.stego_image}.")
 
-if args.embed and os.path.isfile(args.cover_image) and os.path.isfile(args.text_file) and args.stego_image:
-    print(f"Embedding text from {args.text_file} into image {args.cover_image} at {args.stego_image}")
-else:
-    print(f"Recovering text from image {args.stego_image}.")
+    # embed mode checks
+    if args.embed == True:
+        if args.cover_image is None:
+            parser.error('Path to cover image is not specified. Please specify the path of cover image.')
+        elif not os.path.exists(os.path.dirname(args.cover_image)):
+            parser.error(f'Path to cover image directory does not exist:\n\n    {os.path.dirname(args.cover_image)}\n\nPlease specify a valid path or directory.')
+        elif not os.path.isfile(args.cover_image):
+            parser.error(f'Cover image file cannot be located at:\n\n    {args.cover_image}\n\nPlease specify a valid path and image.')
 
-print(get_epilog())
+        elif args.text_file is None:
+            parser.error('Path to text file is not specified.')
+        elif not os.path.exists(os.path.dirname(args.text_file)):
+            parser.error(f'Path to text file directory does not exist:\n\n    {os.path.dirname(args.text_file)}\n\nPlease specify a valid path or directory.')
+        elif not os.path.isfile(args.text_file):
+            parser.error(f'Text file cannot be located at:\n\n    {args.text_file}\n\nPlease specify a valid path or text file.')
+
+
+        elif args.stego_image is None:
+            parser.error('Path to save the stego image is not specified.')
+        elif not os.path.exists(os.path.dirname(args.stego_image)):
+            parser.error(f'Path to stego image directory does not exist:\n\n    {os.path.dirname(args.stego_image)}\n\nPlease specify a valid path or directory.')
+        elif os.path.isfile(args.stego_image):
+            parser.error(f'An image already exists at:\n\n    {args.stego_image}\n\nCannot override image, please specify a different path or name.')
+        else:
+            print(f"Embedding text from {args.text_file} into image at {args.cover_image}\nStego image is saved to {args.stego_image}\n")
+            filedata = loadJPEG(args.cover_image)
+            if filedata == None:
+                parser.error(f'{args.cover_image} is not a valid JPEG file.')
+            else:
+                _cover_image = JPG(args.cover_image)
+    print(get_epilog())
