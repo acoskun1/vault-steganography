@@ -135,6 +135,10 @@ class Header:
         self.quantizationTables: List[QuantizationTable] = []
         self.app0Marker = []
         self.zeroBased: bool = False
+        self.startOfSelection: int = 0
+        self.endOfSeleciton: int = 0
+        self.successiveApproxHigh: int = 0
+        self.successiveApproxLow: int = 0
     
     #done
     def readHeader(self, data: List[int]) -> None:
@@ -235,11 +239,11 @@ class Header:
         """
         Reads the StartOfScan marker in the header. 
         """
-
         print('Reading Start of Scan ...')
 
-        #skips 4 bytes, (marker and length)
+        #skips marker and length bytes.
         i = start + 4
+        #current = number of components
         current = data[i]
 
         if current != self.startOfFrame.numOfComponents:
@@ -247,19 +251,53 @@ class Header:
         
         componentId = None
         for j in range(self.startOfFrame.numOfComponents):
-            print(j)
             component = self.components[j]
             componentId = data[i+1]
             if componentId != component.identifier:
                 raise Exception('Error - Wrong Component ID in Start of Scan.')
-            component.acHuffmanTableId = data[i + 2] & 0x0F
-            component.dcHuffmanTableId = data[i] >> 4
-            i += 2
             
+            acId = data[i + 2] & 0x0F
+            if acId > 3:
+                raise Exception(f'Error - Invalid Huffman AC table ID: {acId}')
+            else:
+                component.acHuffmanTableId = acId
+
+            dcId = data[i + 2] >> 4
+            if dcId > 3:
+                raise Exception(f'Error - Invalid Huffman DC table ID: {dcId}')
+            else:
+                component.dcHuffmanTableId = dcId
+            i += 2
+
         i += 1
+        startOfSelection = data[i]
+        endOfSelection = data[i+1]
+        successiveApprox = data[i+2]
+
+        self.startOfSelection = startOfSelection
+        self.endOfSeleciton = endOfSelection
+        self.successiveApproxHigh = successiveApprox >> 4
+        self.successiveApproxLow = successiveApprox & 0x0F
+
+        if (self.startOfSelection != 0 or self.endOfSeleciton != 63):
+            raise Exception('Error - Invalid spectral selection')
+
+        if (self.successiveApproxHigh != 0 or self.successiveApproxLow != 0):
+            raise Exception('Error - Invalid successive approximation') 
+
         if i != start + len - 1:
             raise Exception('Error - Number of bytes do not equal the length of marker.')
         self.startOfScan.set = True   
+        
+        print(f'Number of image components: {self.startOfFrame.numOfComponents}\n')
+        for _ in range(self.startOfFrame.numOfComponents):
+            component = self.components[_]
+            ac = component.acHuffmanTableId
+            dc = component.dcHuffmanTableId
+            cid = component.identifier
+            print(f'    Component[{cid}]: table={dc}(DC), {ac}(AC)')
+        
+        print(f'\nSpectral selection: {self.startOfSelection} ... {self.endOfSeleciton}\nSuccessive approximation: 0x{self.successiveApproxHigh}{self.successiveApproxLow}\n')
         print('Done.')     
 
     #done

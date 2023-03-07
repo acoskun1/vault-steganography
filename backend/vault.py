@@ -45,7 +45,6 @@ parser.add_argument('text_file', action='store',metavar='TEXT FILE', type=str, h
 parser.add_argument('stego_image', action='store',metavar='STEGO IMAGE', type=str, help='Path to stego image file [for --embed | --retrieve]')
 
 args = parser.parse_args()
-print(args)
 
 if __name__ == "__main__":
     # retrieve mode checks
