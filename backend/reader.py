@@ -1,3 +1,5 @@
+from typing import List
+
 class BitReader:
 
     """
@@ -13,13 +15,13 @@ class BitReader:
     from the most significant (MSB) bit of the next byte.
     """
     
-    def __init__(self, data, startByte=0) -> None:
+    def __init__(self, data: List[int], startByte: int = 0) -> None:
         self.data_ = data
         self.currByte_ = startByte
         self.currBit_ = 0
         self.read_ = False
 
-    def readNextBits(self, n=1) -> int:
+    def readNextBits(self, n: int = 1) -> int:
         result = 0
         for i in range(n):
             if self.read_:

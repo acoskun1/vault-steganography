@@ -134,6 +134,7 @@ class Header:
         self.restartInterval = 0
         self.quantizationTables: List[QuantizationTable] = []
         self.app0Marker = []
+        self.app1Marker = []
         self.zeroBased: bool = False
         self.startOfSelection: int = 0
         self.endOfSeleciton: int = 0
@@ -155,7 +156,7 @@ class Header:
         currByte = 0
         for i in range(len(data)):
             if self.startOfScan.set:
-                bitstreamIdx = i
+                self.bitstreamIndex = i
                 break
 
             currByte = data[i]
@@ -184,6 +185,8 @@ class Header:
                 self.readQT(data, i, markerLen)
             elif marker == 'JFIF segment marker (APP0)':
                 self.readAPP0(data, i, markerLen)
+            elif marker == 'EXIF segment marker (APP1)':
+                self.readAPP1(data, i, markerLen)
 
         i += markerLen + 1
             
@@ -300,7 +303,7 @@ class Header:
         print(f'\nSpectral selection: {self.startOfSelection} ... {self.endOfSeleciton}\nSuccessive approximation: 0x{self.successiveApproxHigh}{self.successiveApproxLow}\n')
         print('Done.')     
 
-    #done
+    #revisit
     def writeSOS(self, header: List[int]) -> None:
 
         """
@@ -542,7 +545,8 @@ class Header:
             print(hufftable.offsets)
 
         print('\nDone.\n-----------------------------------------------')
-    #done - explain
+    
+    #done
     def writeHT(self, header: List[int], table: int, id: int) -> None:
         
         #Add Huffman Table marker bytes (FFC4)
@@ -607,7 +611,7 @@ class Header:
             print(f'Table Length: {qt.length}\nPrecision: {qt.precision} bits\nDestination ID: {qt.dest_id}\n    {qt.table}\n')
         print('Done.\n-----------------------------------------------')
 
-    #done
+    #revisit
     def writeQT(self, header: List[int]) -> None:
         
         """
@@ -616,15 +620,29 @@ class Header:
         for i in self.quantizationTables:
             header.append(i)
 
-    #incomplete - research and see are there other ways? Do we have to focus on APP0 only. APP1 is EXIF. 
+    #done
     def readAPP0(self, data: List[int], start: int, len: int) -> None:
-        pass
+        """
+        Reads APP0 (JFIF) marker segment
+        """
+        print('Reading APP0 (JFIF) Marker ...\n')
+        self.app0Marker = data[start : start + len + 2]
+        print(self.app0Marker)
+        print('\nDone.\n-----------------------------------------------')
+        
+    #done
+    def readAPP1(self, data: List[int], start: int, len: int) -> None:
+        
+        """
+        Reads APP1 (Exif) marker segment
+        """
+        print('Reading APP1 (EXIF) Marker ...\n')
 
-    #incomplete
-    def writeAPP0(self, header: List[int]) -> None:
-        pass
-    
-    #done - explain
+        self.app1Marker = data[start : start + len +2]
+        print(self.app1Marker)
+        print('\nDone.\n-----------------------------------------------')
+        
+    #done
     def readDRI(self, data: List[int], start: int, len: int) -> None:
         """
         Reads the Define Restart Interval Segment
@@ -657,7 +675,7 @@ class JPG:
         self.header.readHeader(data)
         self.readBitstream(data)
     
-    #done - document
+    #done
     def readBitstream(self, data: List[int]) -> None:
 
         s = []
@@ -667,8 +685,8 @@ class JPG:
                 if data[i+1] == 0x00:
                     i+=1
             
-        bWidth = ((self.header.startOfFrame.width + 7) // 8)
-        bHeight = ((self.header.startOfFrame.height + 7) // 8)
+        bWidth = ((self.header.startOfFrame.width + 7) // 8 + 1)
+        bHeight = ((self.header.startOfFrame.height + 7) // 8 + 1)
 
         if bWidth % 2 == 1 and self.header.components[0].horizontalSamplingFactor == 2:
             bWidth += 1
@@ -678,7 +696,7 @@ class JPG:
 
         blocks = bHeight * bWidth
         noOfMCU = blocks // (self.header.components[0].verticalSamplingFactor * self.header.components[0].horizontalSamplingFactor)
-        finalDcCoeff = 0
+        finalDcCoeff: int = 0
 
         bits = BitReader(s)
 
@@ -726,14 +744,14 @@ class JPG:
                 coeffUnsigned = bit.readNextBits(coeffLen)
                 if coeffUnsigned < pow(2, coeffLen - 1):
                     coeffSigned = coeffUnsigned - pow(2, coeffLen) + 1
-
                 else:
                     coeffSigned = int(coeffUnsigned)
+                
                 channel.acCoeff[coeffRead] = coeffSigned
                 coeffRead += 1
 
                 if coeffSigned != 0 and coeffSigned != 1:
-                    self.Bits += 1 
+                    self.Bits += 1
 
     def BlockToBitstream(self) -> None:
         pass
@@ -779,12 +797,10 @@ class JPG:
 
     def getNextCoeff(self) -> int:
         pass
-
-        #needs work
-        #self.img_data = self.readJPG(file)
-
+    
+    #done - needs assurance
     def readNextMCU(self, mcu: MinimumCodedUnit, bit: BitReader, finalDcCoeff: int) -> None:
-        #could add number of components check.
+
         luminanceBlocks = self.header.components[0].horizontalSamplingFactor * self.header.components[0].verticalSamplingFactor
 
         for i in range(luminanceBlocks):
@@ -794,10 +810,6 @@ class JPG:
         if self.header.startOfFrame.numOfComponents > 1:
             self.readBlock(mcu.chrominance[0], bit, finalDcCoeff, self.header.dcHuffmanTables[self.header.components[1].dcHuffmanTableId], self.header.acHuffmanTables[self.header.components[1].acHuffmanTableId])
             finalDcCoeff = mcu.chrominance[0].dcCoeff
-
-            # print(self.header.dcHuffmanTables[self.header.components[2].dcHuffmanTableId])
-            # print(self.header.acHuffmanTables[self.header.components[2].acHuffmanTableId])
-
             self.readBlock(mcu.chrominance[1], bit, finalDcCoeff, self.header.dcHuffmanTables[self.header.components[2].dcHuffmanTableId], self.header.acHuffmanTables[self.header.components[2].acHuffmanTableId])
 
 def getHuffmanCodes(huffmanTable: HuffmanTable) -> None:
@@ -808,6 +820,5 @@ def getHuffmanCodes(huffmanTable: HuffmanTable) -> None:
             code += 1
         code = code << 1
 
-# if __name__ == "__main__":
-#     img = JPG('bird.jpg')
-    
+if __name__ == "__main__":
+    img = JPG('bird.jpg')
