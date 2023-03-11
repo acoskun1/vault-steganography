@@ -1,5 +1,5 @@
 from struct import unpack
-from typing import List, Dict
+from typing import List, Union
 
 #implement Reader class
 from reader import BitReader
@@ -72,6 +72,11 @@ def loadJPEG(filename: str) -> List[int]:
     except FileNotFoundError:
         print(f'Error - Cannot open {filename} file.')
         return None
+
+class CodeWrapper:
+    def __init__(self, code: int, length: int) -> None:
+        self.code: int = code
+        self.length: int = length
 
 class StartOfFrame:
     def __init__(self) -> None:
@@ -661,14 +666,27 @@ class Header:
 
         print(f'Restart Interval: {self.restartInterval}\nLength: {len}')
         print('\nDone.\n-----------------------------------------------')
+
+    def convertSymbolToCode(self, symbol: int, isAC: bool, isChrominance: bool, wrapper: CodeWrapper) -> None:
+        ht = self.acHuffmanTables[isChrominance] if isAC else self.dcHuffmanTables[isChrominance]
+
+        for offset in range(16):
+            for codeIndex in range(ht.offsets[offset], ht.offsets[offset + 1]):
+                if ht.symbols[codeIndex] == symbol:
+                    wrapper.code = ht.codes[codeIndex]
+                    wrapper.length = offset + 1
+                    return
         
+        message = f"Code for {symbol:02X} cannot be found in Huffman table."
+        raise RuntimeError(message)
+
 class JPG:
     def __init__(self, file):
         self.header = Header()
         self.MCUVector: List[MinimumCodedUnit] = []
         self.currMCU = 0
-        self.Channel = 0
-        self.ChannelType = True
+        self.currChannel = 0
+        self.currChannelType = True
         self.Coefficient = 0
         self.Bits = 0
         data = loadJPEG(file)
@@ -752,9 +770,54 @@ class JPG:
 
                 if coeffSigned != 0 and coeffSigned != 1:
                     self.Bits += 1
+    
+    #done - revisit
+    def addBlockToBitstream(self, channel: Channel, bw: BitWriter, chr: bool) -> None:
+        coefficient: int = None
+        zeroCount: int = 0
+        codeWrapper = CodeWrapper()
+        coefficientLength: int = None
+        symbol: int = None
 
-    def BlockToBitstream(self) -> None:
-        pass
+        coefficient = channel.dcCoeff
+        coefficientLength = getMinimumBinaryLength(coefficient)
+
+        symbol = 0x00 | coefficientLength
+        self.header.convertSymbolToCode(symbol, False, chr, codeWrapper)
+        bw.write(codeWrapper.code, codeWrapper.length)
+
+        if coefficient < 0:
+            coefficient = coefficient - 1
+        bw.write(coefficient, coefficientLength)
+        
+        for j in range(63):
+            coefficient = channel.acCoeff[j]
+
+            if j == 62 and coefficient == 0:
+                self.header.convertSymbolToCode(0x00, True, chr, codeWrapper)
+                bw.write(codeWrapper.code, codeWrapper.length)
+                break
+            elif coefficient == 0:
+                zeroCount += 1
+            else:
+                while zeroCount >= 16:
+                    self.header.convertSymbolToCode(0xF0, True, chr, codeWrapper)
+                    bw.write(codeWrapper.code, codeWrapper.length)
+                    zeroCount -= 16
+
+                
+                coefficientLength = getMinimumBinaryLength(coefficient)
+                symbol = 0x00 | zeroCount
+                symbol = symbol << 4
+                symbol = symbol | coefficientLength
+                self.header.convertSymbolToCode(symbol, True, chr, codeWrapper)
+                bw.write(codeWrapper.code, codeWrapper.length)
+
+                if coefficient < 0:
+                    coefficient = coefficient - 1
+                bw.write(coefficient, coefficientLength)
+
+                zeroCount = 0
 
     def extractFromJPG(self, secretMedium: List[int]) -> None:
         pass
@@ -762,7 +825,8 @@ class JPG:
     def newBitstream(self, stream: List[int]) -> None:
         pass
 
-    def MCUtoBitstream(self) -> None:
+    def addMCUtoBitstream(self, mcu: MinimumCodedUnit, bw: BitWriter) -> None:
+        # numberOfLum = self.header.components. 
         pass
 
     def resetCurr(self) -> None:
@@ -819,6 +883,19 @@ def getHuffmanCodes(huffmanTable: HuffmanTable) -> None:
             huffmanTable.codes[i] = code
             code += 1
         code = code << 1
+
+def getMinimumBinaryLength(number: int) -> int:
+    if number == 0:
+        return 0
+    if number < 0:
+        number = abs(number)
+    
+    length = 0
+    while number:
+        number = number >> 1
+        length += 1
+
+    return length
 
 if __name__ == "__main__":
     img = JPG('bird.jpg')
