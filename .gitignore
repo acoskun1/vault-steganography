@@ -1,6 +1,4 @@
 env/
-backend/bolt.jpg
-backend/bird.jpg
-backend/harambe.jpg
+backend/images/
 backend/__pycache__
 backend/test.txt

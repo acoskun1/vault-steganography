@@ -166,19 +166,18 @@ class Header:
 
             currByte = data[i]
             if currByte != 0xFF: #0xFF byte is a marker segment identifier, all marker segments begin with FF
+                # i += 1
                 continue
 
             currByte = data[i+1]
-            if currByte == 0xFF or currByte == 0xD8 or currByte == 0xD9 or currByte == 0x01:
+            if currByte in [0xD8, 0xD9, 0x01, 0xFF]:
                 i += 1
                 continue
                 
             markerLen = self.readMarkerLength(data, i+2)
             marker = supportedMarkers.get(currByte)
 
-            if marker is None or marker in unsupportedMarkers:
-                raise Exception(f"Error: Unsupported marker ({hex(currByte)}) found in file.")
-            elif marker == 'Start of Frame (SOF)':
+            if marker == 'Start of Frame (SOF)':
                 self.readSOF(data, i, markerLen)
             elif marker == 'Start of Scan (SOS)':
                 self.readSOS(data, i, markerLen)
@@ -192,6 +191,8 @@ class Header:
                 self.readAPP0(data, i, markerLen)
             elif marker == 'EXIF segment marker (APP1)':
                 self.readAPP1(data, i, markerLen)
+            elif marker in unsupportedMarkers:
+                raise Exception(f"Error: Unsupported marker ({hex(currByte)}) found in file.")
 
         i += markerLen + 1
             
@@ -306,7 +307,7 @@ class Header:
             print(f'    Component[{cid}]: table={dc}(DC), {ac}(AC)')
         
         print(f'\nSpectral selection: {self.startOfSelection} ... {self.endOfSeleciton}\nSuccessive approximation: 0x{self.successiveApproxHigh}{self.successiveApproxLow}\n')
-        print('Done.')     
+        print('Done.\n-----------------------------------------------')     
 
     #revisit
     def writeSOS(self, header: List[int]) -> None:
@@ -703,8 +704,8 @@ class JPG:
                 if data[i+1] == 0x00:
                     i+=1
             
-        bWidth = ((self.header.startOfFrame.width + 7) // 8 + 1)
-        bHeight = ((self.header.startOfFrame.height + 7) // 8 + 1)
+        bWidth = ((self.header.startOfFrame.width + 7) // 8)
+        bHeight = ((self.header.startOfFrame.height + 7) // 8)
 
         if bWidth % 2 == 1 and self.header.components[0].horizontalSamplingFactor == 2:
             bWidth += 1
@@ -756,15 +757,18 @@ class JPG:
                 coeffRead += 16
                 continue
             else:
+                # The problem is here in coeffRead. It hits 64 which makes it out of bounds.
                 coeffLen = symbol & 0x0F
-                zeros = int((symbol >> 4) & 0x0F)
+                zeros = (symbol >> 4) & 0x0F
                 coeffRead += zeros
+                # print(coeffRead)
                 coeffUnsigned = bit.readNextBits(coeffLen)
                 if coeffUnsigned < pow(2, coeffLen - 1):
                     coeffSigned = coeffUnsigned - pow(2, coeffLen) + 1
                 else:
-                    coeffSigned = int(coeffUnsigned)
+                    coeffSigned = coeffUnsigned
                 
+                print(len(channel.acCoeff))
                 channel.acCoeff[coeffRead] = coeffSigned
                 coeffRead += 1
 
@@ -898,4 +902,4 @@ def getMinimumBinaryLength(number: int) -> int:
     return length
 
 if __name__ == "__main__":
-    img = JPG('bird.jpg')
+    img = JPG('images/Kavkaz.jpg')
