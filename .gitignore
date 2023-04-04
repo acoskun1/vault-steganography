@@ -2,3 +2,4 @@ env/
 backend/images/
 backend/__pycache__
 backend/test.txt
+.vscode/

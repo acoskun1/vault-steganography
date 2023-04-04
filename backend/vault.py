@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from jpeg import JPG, loadJPEG
+from jpeg import JPG, loadJPEG, printMCU
 from datetime import datetime
 from dateutil import tz
 import argparse
@@ -102,4 +102,5 @@ if __name__ == "__main__":
                 parser.error(f'{args.cover_image} is not a valid JPEG file.')
             else:
                 _cover_image = JPG(args.cover_image)
+                # printMCU(_cover_image.MCUVector[-1])
     print(get_epilog())
