@@ -1,12 +1,7 @@
-from struct import unpack
 from typing import List
-
-#implement Reader class
 from reader import BitReader
 from writer import BitWriter
 import os
-import sys
-import numpy as np
 
 
 #Markers that are supported for JPEG/JFIF
@@ -700,6 +695,7 @@ class Header:
         message = f"Code for {symbol:02X} cannot be found in Huffman table."
         raise RuntimeError(message)
 
+    #done
     def fillHeaderBytes(self, header: bytearray) -> None:
         
         # add StartOfImage marker (FFD8)
@@ -822,7 +818,7 @@ class JPG:
                 if coefficient_signed != 0 and coefficient_signed != 1:
                     self.Bits += 1
     
-    #done - revisit
+    #done
     def addBlockToBitstream(self, channel: Channel, bw: BitWriter, chr: bool) -> None:
         coefficient: int = None
         zeroCount: int = 0
@@ -831,7 +827,7 @@ class JPG:
         symbol: int = None
 
         coefficient = channel.dcCoeff
-        coefficientLength = getMinimumBinaryLength(coefficient)
+        coefficientLength = getMinBinaryLength(coefficient)
 
         symbol = 0x00 | coefficientLength
         self.header.convertSymbolToCode(symbol, False, chr, codeWrapper)
@@ -857,7 +853,7 @@ class JPG:
                     zeroCount -= 16
 
                 
-                coefficientLength = getMinimumBinaryLength(coefficient)
+                coefficientLength = getMinBinaryLength(coefficient)
                 symbol = 0x00 | zeroCount
                 symbol = symbol << 4
                 symbol = symbol | coefficientLength
@@ -869,10 +865,6 @@ class JPG:
                 bw.write(coefficient, coefficientLength)
 
                 zeroCount = 0
-
-    #implement
-    def extractFromJPG(self, secretMedium: List[int]) -> None:
-        pass
     
     #implement
     def newBitstream(self, stream: List[int]) -> None:
@@ -974,7 +966,8 @@ class JPG:
             self.readBlock(mcu.chrominance[1], bit, finalDcCoeff, self.header.dcHuffmanTables[self.header.components[2].dcHuffmanTableId], self.header.acHuffmanTables[self.header.components[2].acHuffmanTableId])
             # printBlock(mcu.chrominance[1])
 
-    def extractFromFile(self, secretData: bytearray) -> None:
+    #done
+    def extractFromJPG(self, secretData: bytearray) -> None:
 
         self.resetCurr()
 
@@ -996,6 +989,7 @@ class JPG:
                 secretData.append(byte)
                 byte = 0x00
 
+    #done
     def saveJPGData(self, name: str) -> None:
         
         '''
@@ -1029,6 +1023,7 @@ class JPG:
         _bytes.append(0xFF, 0xD9)
         writeToFile(name, _bytes)
 
+    #done
     def makeNewBitstream(self, bitstream: bytearray) -> None:
 
         bitwriter = BitWriter()
@@ -1057,7 +1052,11 @@ def getHuffmanCodes(huffmanTable: HuffmanTable) -> None:
             code += 1
         code = code << 1
 
-def getMinimumBinaryLength(number: int) -> int:
+#implement
+def getCodeBinary() -> str:
+    pass
+
+def getMinBinaryLength(number: int) -> int:
     if number == 0:
         return 0
     if number < 0:
@@ -1154,10 +1153,35 @@ def createHuffmanTable(huffman_table: HuffmanTable, type: str, component: str) -
 
     getHuffmanCodes(huffman_table) 
 
+def removeNameFromFileData(filedata: bytearray) -> str:
+
+    file: str = ''
+    idx: int = 0
+    for i in range(len(filedata)-1, -1, -1):
+        if filedata[i] == ord('/'):
+            idx = i
+            break
+    
+    if idx == 0:
+        raise RuntimeError("Error - Could not remove the file name.")
+    
+    for i in range(idx + 1, len(filedata)):
+        file += chr(filedata[i])
+    
+    del filedata[idx:len(filedata)]
+    
+    return file
+
 def writeToFile(name: str, data: bytes) -> None:
     with open(name, 'wb') as file:
         file.write(data)
 
+#move inside JPG class, make it a member function.
+def recoverHiddenFile(jpg: JPG) -> None:
+    secretData: bytearray = []
+    jpg.extractFromJPG(secretData)
+    filename = removeNameFromFileData(secretData)
+    writeToFile(filename, secretData)
 
 # if __name__ == "__main__":
 #     img = JPG('images/bird.jpg')
