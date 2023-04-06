@@ -1,5 +1,5 @@
 from struct import unpack
-from typing import List, Union
+from typing import List
 
 #implement Reader class
 from reader import BitReader
@@ -145,7 +145,10 @@ class Header:
         self.endOfSeleciton: int = 0
         self.successiveApproxHigh: int = 0
         self.successiveApproxLow: int = 0
-    
+
+    def __str__(self) -> str:
+        pass
+
     #done
     def readHeader(self, data: List[int]) -> None:
 
@@ -643,7 +646,12 @@ class Header:
         self.app0Marker = data[start : start + len + 2]
         print(self.app0Marker)
         print('\nDone.\n-----------------------------------------------')
-        
+
+    def writeAPP0(self, header: bytearray) -> None:   
+        header.append(0xFF, 0xE0)
+        for i in self.app0Marker:
+            header.append(i)
+
     #revisit
     def readAPP1(self, data: List[int], start: int, len: int) -> None:
         
@@ -692,6 +700,32 @@ class Header:
         message = f"Code for {symbol:02X} cannot be found in Huffman table."
         raise RuntimeError(message)
 
+    def fillHeaderBytes(self, header: bytearray) -> None:
+        
+        # add StartOfImage marker (FFD8)
+        header.append(0xFF, 0xD8)
+
+        # write JFIF APP0 segment marker
+        if len(self.app0Marker) > 0:
+            self.writeAPP0(header)
+
+        # write EXIF APP1 segment and more.
+
+        # write StartOfFrame markers
+        self.writeSOF(header)
+
+        # write Define Huffman Table markers
+        self.writeDHT(header, 0, 0)
+        self.writeDHT(header, 0, 1)
+        self.writeDHT(header, 1, 0)
+        self.writeDHT(header, 1, 1)
+
+        # write Define Quantization Table marker
+        self.writeDQT(header)
+
+        # write StartOfScan marker
+        self.writeSOS(header)
+
 class JPG:
     def __init__(self, file):
         self.header = Header()
@@ -704,6 +738,9 @@ class JPG:
         data = loadJPEG(file)
         self.header.readHeader(data)
         self.readBitstream(data)
+
+    def __str__(self) -> str:
+        pass
     
     #done
     def readBitstream(self, data: List[int]) -> None:
@@ -842,7 +879,15 @@ class JPG:
         pass
     
     #implement
-    def addMCUtoBitstream(self, mcu: MinimumCodedUnit, bw: BitWriter) -> None:
+    def addMCUtoBitstream(self, bitwriter: BitWriter, mcu: MinimumCodedUnit) -> None:
+
+        # numberOfLuminance: int = self.header.components
+        # for i in range(numberOfLuminance):
+        #     self.addBlockToBitstream(mcu.luminance[i], bitwriter, False)
+        
+        # if self.header.startOfFrame.numOfComponents > 1:
+        #     self.addBlockToBitstream(mcu.chrominance[0], bitwriter, True)
+        #     self.addBlockToBitstream(mcu.chrominance[1], bitwriter, True)
         pass
 
     #done     
@@ -929,6 +974,69 @@ class JPG:
             self.readBlock(mcu.chrominance[1], bit, finalDcCoeff, self.header.dcHuffmanTables[self.header.components[2].dcHuffmanTableId], self.header.acHuffmanTables[self.header.components[2].acHuffmanTableId])
             # printBlock(mcu.chrominance[1])
 
+    def extractFromFile(self, secretData: bytearray) -> None:
+
+        self.resetCurr()
+
+        size: int = 0
+        c: int
+        byte: int = 0x00
+
+        for i in range(32):
+            c = self.getNextFreeCoeff()
+            size = size << 1
+            size = size | (c & 0x01)
+        
+        for i in range(1, size * 8 + 1):
+            c = self.getNextFreeCoeff()
+            byte = byte << 1
+            byte = byte | (c & 0x01)
+            
+            if (i % 8 == 0):
+                secretData.append(byte)
+                byte = 0x00
+
+    def saveJPGData(self, name: str) -> None:
+        
+        '''
+        Saves current JPEG image in memory to a file with the given name.
+
+        + creates huffman tables for color components. (dc coefficients and ac coefficients use separate huffman tables.)
+        + updates the dcHuffmanTables and acHuffmanTables members of the header object with four huffman tables created.
+        + creates new bitstream  and adds the end of image marker bytes (FFD9) to the end of bitstream.
+        + saves the new bitstream to a file with given name.
+        '''
+        dcLuminance = HuffmanTable()
+        acLuminance = HuffmanTable()
+        dcChrominance = HuffmanTable()
+        acChrominance = HuffmanTable()
+        
+        createHuffmanTable(dcLuminance, 'dc', 'lum')
+        createHuffmanTable(acLuminance, 'ac', 'lum')
+        createHuffmanTable(dcLuminance, 'dc', 'chr')
+        createHuffmanTable(acLuminance, 'ac', 'chr')
+
+        self.header.dcHuffmanTables[0] = dcLuminance
+        self.header.dcHuffmanTables[1] = dcChrominance
+        self.header.acHuffmanTables[0] = acLuminance
+        self.header.acHuffmanTables[1] = acChrominance
+
+        _bytes: bytearray = []
+        self.header.fillHeaderBytes(_bytes)
+        
+        self.makeNewBitstream(_bytes)
+        
+        _bytes.append(0xFF, 0xD9)
+        writeToFile(name, _bytes)
+
+    def makeNewBitstream(self, bitstream: bytearray) -> None:
+
+        bitwriter = BitWriter()
+        for i in range(len(self.MCUVector)):
+            self.addMCUtoBitstream(self.MCUVector[i], bitwriter)
+        bitwriter.copy(bitstream, True)
+
+
 def printBlock(channel: Channel) -> None:
     print('DC: ', channel.dcCoeff)
     print('AC: ', end=" ")
@@ -961,6 +1069,94 @@ def getMinimumBinaryLength(number: int) -> int:
         length += 1
 
     return length
+
+def createHuffmanTable(huffman_table: HuffmanTable, type: str, component: str) -> None:
+
+    if type != 'dc' and type != 'ac':
+        raise RuntimeError("Huffman table type is not 'ac' or 'dc'.")
+    
+    if component != 'lum' and component != 'chr':
+        raise RuntimeError("Component can be either 'lum' (luminance) or 'chr' (chrominance)")
+    
+    dcSymbols = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B]
+    acLuminanceSymbols = [
+        0x01, 0x02, 0x03, 0x00, 0x04, 0x11,
+        0x05, 0x12, 0x21, 0x31, 0x41, 0x06,
+        0x13, 0x51, 0x61, 0x07, 0x22, 0x71,
+        0x14, 0x32, 0x81, 0x91, 0xA1, 0x08,
+        0x23, 0x42, 0xB1, 0xC1, 0x15, 0x52,
+        0xD1, 0xF0, 0x24, 0x33, 0x62, 0x72,
+        0x82, 0x09, 0x0A, 0x16, 0x17, 0x18,
+        0x19, 0x1A, 0x25, 0x26, 0x27, 0x28,
+        0x29, 0x2A, 0x34, 0x35, 0x36, 0x37,
+        0x38, 0x39, 0x3A, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x53, 0x54, 0x55, 0x56
+        , 0x57, 0x58, 0x59, 0x5A, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x73, 0x74, 0x75, 0x76
+        , 0x77, 0x78, 0x79, 0x7A, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0x92, 0x93, 0x94, 0x95
+        , 0x96, 0x97, 0x98, 0x99, 0x9A, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xB2, 0xB3
+        , 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xCA
+        , 0xD2 , 0xD3 , 0xD4 , 0xD5 , 0xD6 , 0xD7 , 0xD8 , 0xD9 , 0xDA , 0xE1 , 0xE2 , 0xE3 , 0xE4 , 0xE5 , 0xE6 , 0xE7
+        , 0xE8 , 0xE9 , 0xEA , 0xF1 , 0xF2 , 0xF3 , 0xF4 , 0xF5 , 0xF6 , 0xF7 , 0xF8 , 0xF9 , 0xFA
+    ]
+
+    acChrominanceSymbols = [
+        0x00, 0x01
+        , 0x02
+        , 0x03 , 0x11
+        , 0x04 , 0x05 , 0x21 , 0x31
+        , 0x06 , 0x12 , 0x41 , 0x51
+        , 0x07 , 0x61 , 0x71
+        , 0x13 , 0x22 , 0x32 , 0x81
+        , 0x08 , 0x14, 0x42, 0x91, 0xA1,
+        0xB1, 0xC1, 0x09, 0x23, 0x33, 0x52, 0xF0, 0x15, 0x62, 0x72
+        ,0xD1, 0x0A, 0x16, 0x24, 0x34, 0xE1, 0x25, 0xF1, 0x17, 0x18
+        ,0x19, 0x1A, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x35, 0x36, 0x37
+        ,0x38, 0x39, 0x3A, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49
+        ,0x4A, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A, 0x63
+        ,0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x73, 0x74, 0x75
+        ,0x76, 0x77, 0x78, 0x79, 0x7A, 0x82, 0x83, 0x84, 0x85, 0x86
+        ,0x87, 0x88, 0x89, 0x8A, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97
+        ,0x98, 0x99, 0x9A, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8
+        ,0xA9, 0xAA, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9
+        ,0xBA, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xCA
+        ,0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xE2
+        ,0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xF2, 0xF3
+        ,0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA
+    ]
+
+    dcLuminanceOffsets = [0, 0, 1, 6, 7, 8, 9, 10, 11, 12, 12, 12, 12, 12, 12, 12, 12]
+    dcChrominanceOffsets = [0, 0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 12, 12, 12, 12, 12]
+    acLuminanceOffsets = [0, 0, 2, 3, 6, 9, 11, 15, 18, 23, 28, 32, 36, 36, 36, 37, 162]
+    acChrominanceOffsets = [0, 0, 2, 3, 5, 9, 13, 16, 20, 27, 32, 36, 40, 40, 41, 43, 162]
+
+    if type == 'dc':
+        for i in range(12):
+            huffman_table.symbols[i] = dcSymbols[i]
+        
+        if component == 'lum':
+            for i in range(17):
+                huffman_table.offsets[i] = dcLuminanceOffsets[i]
+        else:
+            for i in range(17):
+                huffman_table.offsets[i] = dcChrominanceOffsets[i]
+    
+    if type == 'ac':
+        if component == 'lum':
+            for i in range(162):
+                huffman_table.symbols[i] = acLuminanceSymbols[i]
+            for i in range(17):
+                huffman_table.offsets[i] = acLuminanceOffsets[i]
+
+        else:
+            for i in range(162):
+                huffman_table.symbols[i] = acChrominanceSymbols[i]
+            for i in range(17):
+                huffman_table.offsets[i] = acChrominanceOffsets[i]
+
+    getHuffmanCodes(huffman_table) 
+
+def writeToFile(name: str, data: bytes) -> None:
+    with open(name, 'wb') as file:
+        file.write(data)
 
 
 # if __name__ == "__main__":
