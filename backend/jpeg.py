@@ -833,19 +833,26 @@ class JPG:
 
                 zeroCount = 0
 
+    #implement
     def extractFromJPG(self, secretMedium: List[int]) -> None:
         pass
-
+    
+    #implement
     def newBitstream(self, stream: List[int]) -> None:
         pass
-
+    
+    #implement
     def addMCUtoBitstream(self, mcu: MinimumCodedUnit, bw: BitWriter) -> None:
-        # numberOfLum = self.header.components.
         pass
 
+    #done     
     def resetCurr(self) -> None:
-        pass
+        self.Coefficient = 0
+        self.currChannel = 0
+        self.currChannelType = True
+        self.currMCU = 0
 
+    #done
     def readNextSymbol(self, bits: BitReader, huffmanTable: HuffmanTable) -> int:
         code: int = 0
         codeIdx: int = 0
@@ -867,14 +874,44 @@ class JPG:
         
         return huffmanTable.symbols[codeIdx]
 
+    #done
     def getNextFreeCoeff(self) -> int:
         i = self.getNextCoeff()
-        while i[0] == 0 or i[0] == 1:
-            i = self.getNextFreeCoeff()
+        while i == 0 or i == 1:
+            i = self.getNextCoeff()
         return i
 
+    #done
     def getNextCoeff(self) -> int:
-        pass
+        
+        if self.currMCU >= len(self.MCUVector): 
+            raise RuntimeError("Index of coefficient read is out of range.")
+        
+        if self.currChannelType:
+            i = self.MCUVector[self.currMCU].luminance[self.currChannel].acCoeff[self.Coefficient]
+        else:
+            i = self.MCUVector[self.currMCU].chrominance[self.currChannel].acCoeff[self.Coefficient]
+        
+        self.Coefficient += 1
+        self.Coefficient = self.Coefficient % 63
+
+        if self.Coefficient == 0:
+            if self.currChannelType:
+                mod: int = self.header.components[self.currChannel].horizontalSamplingFactor * self.header.components[self.currChannel].verticalSamplingFactor
+                self.currChannel += 1
+                self.currChannel = self.currChannel % mod
+                if self.currChannel == 0:
+                    self.currChannelType = False
+            else:
+                self.currChannel += 1
+                self.currChannel = self.currChannel % 2
+                if self.currChannel == 0:
+                    self.currChannelType = True
+        
+        if self.Coefficient == 0 and self.currChannel == 0 and self.currChannelType:
+            self.currMCU += 1
+        
+        return i
     
     #done
     def readNextMCU(self, mcu: MinimumCodedUnit, bit: BitReader, finalDcCoeff: int) -> None:
