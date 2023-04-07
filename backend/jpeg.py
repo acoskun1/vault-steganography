@@ -3,7 +3,6 @@ from reader import BitReader
 from writer import BitWriter
 import os
 
-
 #Markers that are supported for JPEG/JFIF
 supportedMarkers = {
     0xD8: 'Start of Image (SOI)',
@@ -80,13 +79,13 @@ class StartOfFrame:
 #Component Class (Y'CbCr or Grayscale)
 class Component:
     def __init__(self) -> None:
-        self.identifier = 0
-        self.quantizationTableNumber = 0
-        self.acHuffmanTableId = 0
-        self.dcHuffmanTableId = 0
-        self.verticalSamplingFactor = 0
-        self.horizontalSamplingFactor = 0
-        self.used = False
+        self.identifier: int = 0
+        self.quantizationTableNumber: int = 0
+        self.acHuffmanTableId: int = 0
+        self.dcHuffmanTableId: int = 0
+        self.verticalSamplingFactor: int = 0
+        self.horizontalSamplingFactor: int = 0
+        self.used: bool = False
 
 class QuantizationTable:
     def __init__(self, len: int, precision: int, dest_id: int) -> None:
@@ -632,7 +631,6 @@ class Header:
         for i in self.quantizationTables:
             header.append(i)
 
-    #revisit
     def readAPP0(self, data: List[int], start: int, len: int) -> None:
         """
         Reads APP0 (JFIF) marker segment
@@ -646,18 +644,6 @@ class Header:
         header.append(0xFF, 0xE0)
         for i in self.app0Marker:
             header.append(i)
-
-    #revisit
-    def readAPP1(self, data: List[int], start: int, len: int) -> None:
-        
-        """
-        Reads APP1 (Exif) marker segment
-        """
-        print('Reading APP1 (EXIF) Marker ...\n')
-
-        self.app1Marker = data[start : start + len +2]
-        print(self.app1Marker)
-        print('\nDone.\n-----------------------------------------------')
         
     #fixed
     def readDRI(self, data: List[int], start: int, len: int) -> None:
@@ -819,7 +805,7 @@ class JPG:
                     self.Bits += 1
     
     #done
-    def addBlockToBitstream(self, channel: Channel, bw: BitWriter, chr: bool) -> None:
+    def addBlockToBitstream(self, channel: Channel, bw: BitWriter, isChrominance: bool) -> None:
         coefficient: int = None
         zeroCount: int = 0
         codeWrapper = CodeWrapper()
@@ -830,7 +816,7 @@ class JPG:
         coefficientLength = getMinBinaryLength(coefficient)
 
         symbol = 0x00 | coefficientLength
-        self.header.convertSymbolToCode(symbol, False, chr, codeWrapper)
+        self.header.convertSymbolToCode(symbol, False, isChrominance, codeWrapper)
         bw.write(codeWrapper.code, codeWrapper.length)
 
         if coefficient < 0:
@@ -841,14 +827,14 @@ class JPG:
             coefficient = channel.acCoeff[j]
 
             if j == 62 and coefficient == 0:
-                self.header.convertSymbolToCode(0x00, True, chr, codeWrapper)
+                self.header.convertSymbolToCode(0x00, True, isChrominance, codeWrapper)
                 bw.write(codeWrapper.code, codeWrapper.length)
                 break
             elif coefficient == 0:
                 zeroCount += 1
             else:
                 while zeroCount >= 16:
-                    self.header.convertSymbolToCode(0xF0, True, chr, codeWrapper)
+                    self.header.convertSymbolToCode(0xF0, True, isChrominance, codeWrapper)
                     bw.write(codeWrapper.code, codeWrapper.length)
                     zeroCount -= 16
 
@@ -857,7 +843,7 @@ class JPG:
                 symbol = 0x00 | zeroCount
                 symbol = symbol << 4
                 symbol = symbol | coefficientLength
-                self.header.convertSymbolToCode(symbol, True, chr, codeWrapper)
+                self.header.convertSymbolToCode(symbol, True, isChrominance, codeWrapper)
                 bw.write(codeWrapper.code, codeWrapper.length)
 
                 if coefficient < 0:
@@ -865,22 +851,16 @@ class JPG:
                 bw.write(coefficient, coefficientLength)
 
                 zeroCount = 0
-    
-    #implement
-    def newBitstream(self, stream: List[int]) -> None:
-        pass
-    
-    #implement
-    def addMCUtoBitstream(self, bitwriter: BitWriter, mcu: MinimumCodedUnit) -> None:
-
-        # numberOfLuminance: int = self.header.components
-        # for i in range(numberOfLuminance):
-        #     self.addBlockToBitstream(mcu.luminance[i], bitwriter, False)
         
-        # if self.header.startOfFrame.numOfComponents > 1:
-        #     self.addBlockToBitstream(mcu.chrominance[0], bitwriter, True)
-        #     self.addBlockToBitstream(mcu.chrominance[1], bitwriter, True)
-        pass
+    #done - assumption of index 0 - Luminance
+    def writeMCUtoBitstream(self, mcu: MinimumCodedUnit, bitwriter: BitWriter) -> None:
+        number_of_luminance_components: int = self.header.components[0].horizontalSamplingFactor * self.header.components[0].verticalSamplingFactor
+        for i in range(number_of_luminance_components):
+            self.addBlockToBitstream(mcu.luminance[i], bitwriter, False)
+        
+        if self.header.startOfFrame.numOfComponents > 1:
+            self.addBlockToBitstream(mcu.chrominance[0], bitwriter, True)
+            self.addBlockToBitstream(mcu.chrominance[1], bitwriter, True)
 
     #done     
     def resetCurr(self) -> None:
@@ -1028,9 +1008,17 @@ class JPG:
 
         bitwriter = BitWriter()
         for i in range(len(self.MCUVector)):
-            self.addMCUtoBitstream(self.MCUVector[i], bitwriter)
+            self.writeMCUtoBitstream(self.MCUVector[i], bitwriter)
         bitwriter.copy(bitstream, True)
 
+    def inject(self, filename: str) -> None:
+        pass
+
+    def recoverHiddenFile(self) -> None:
+        secretData: bytearray = []
+        self.extractFromJPG(secretData)
+        filename = removeNameFromFileData(secretData)
+        writeToFile(filename, secretData)
 
 def printBlock(channel: Channel) -> None:
     print('DC: ', channel.dcCoeff)
@@ -1052,9 +1040,15 @@ def getHuffmanCodes(huffmanTable: HuffmanTable) -> None:
             code += 1
         code = code << 1
 
-#implement
-def getCodeBinary() -> str:
-    pass
+def getCodeBinary(size: int, code: int) -> str:
+    string: str = ''
+    for i in range(size):
+        if (code & 0x01 == 1):
+            string = '1' + string
+        else:
+            string = '0' + string
+        code = code >> 1
+    return string
 
 def getMinBinaryLength(number: int) -> int:
     if number == 0:
@@ -1068,6 +1062,16 @@ def getMinBinaryLength(number: int) -> int:
         length += 1
 
     return length
+
+def prepFileToInject(filedata: bytearray, filename: str) -> None:
+    
+    filename = os.path.basename(filename)
+    filedata.append(ord('/'))
+    filedata.extend([ord(char) for char in filename])
+    datasize = len(filedata)
+    for i in range(4):
+        _byte = (datasize >> (8 * i)) & 0xFF
+        filedata.insert(0, _byte)
 
 def createHuffmanTable(huffman_table: HuffmanTable, type: str, component: str) -> None:
 
@@ -1176,12 +1180,7 @@ def writeToFile(name: str, data: bytes) -> None:
     with open(name, 'wb') as file:
         file.write(data)
 
-#move inside JPG class, make it a member function.
-def recoverHiddenFile(jpg: JPG) -> None:
-    secretData: bytearray = []
-    jpg.extractFromJPG(secretData)
-    filename = removeNameFromFileData(secretData)
-    writeToFile(filename, secretData)
+
 
 # if __name__ == "__main__":
 #     img = JPG('images/bird.jpg')

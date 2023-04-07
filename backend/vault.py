@@ -4,7 +4,10 @@ from datetime import datetime
 from dateutil import tz
 import argparse
 import os
+import time
 
+
+start_time = time.time()
 
 class CustomHelpFormatter(argparse.HelpFormatter):
     def __init__(self, prog: str, indent_increment: int = 2, max_help_position: int = 24, width: int | None = None) -> None:
@@ -47,6 +50,7 @@ parser.add_argument('stego_image', action='store',metavar='STEGO IMAGE', type=st
 args = parser.parse_args()
 
 if __name__ == "__main__":
+
     # retrieve mode checks
     if args.retrieve == True:
         if args.stego_image is None:
@@ -102,5 +106,10 @@ if __name__ == "__main__":
                 parser.error(f'{args.cover_image} is not a valid JPEG file.')
             else:
                 _cover_image = JPG(args.cover_image)
+                _cover_image.inject(args.text_file)
                 # printMCU(_cover_image.MCUVector[-1])
+    
+    _wall_time = round(time.time() - start_time, 2)
+
     print(get_epilog())
+    print(f'Time Elapsed (wall clock): {_wall_time} s')
