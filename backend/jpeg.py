@@ -1180,7 +1180,5 @@ def writeToFile(name: str, data: bytes) -> None:
     with open(name, 'wb') as file:
         file.write(data)
 
-
-
 # if __name__ == "__main__":
 #     img = JPG('images/bird.jpg')
