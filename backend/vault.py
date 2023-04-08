@@ -5,7 +5,10 @@ from dateutil import tz
 import argparse
 import os
 import time
+import logging
 
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger('vault-logger')
 
 start_time = time.time()
 
@@ -100,7 +103,7 @@ if __name__ == "__main__":
         elif os.path.isfile(args.stego_image):
             parser.error(f'An image already exists at:\n\n    {args.stego_image}\n\nCannot override image, please specify a different path or name.')
         else:
-            print(f"Embedding text from {args.text_file} into image at {args.cover_image}\nStego image is saved to {args.stego_image}\n")
+            print(f"\nEmbedding from {args.text_file} into {args.cover_image}\n")
             filedata = loadJPEG(args.cover_image)
             if filedata == None:
                 parser.error(f'{args.cover_image} is not a valid JPEG file.')
@@ -108,8 +111,10 @@ if __name__ == "__main__":
                 _cover_image = JPG(args.cover_image)
                 _cover_image.inject(args.text_file)
                 # printMCU(_cover_image.MCUVector[-1])
+
+                print("Stego image is saved to {args.stego_image}\n")
     
     _wall_time = round(time.time() - start_time, 2)
 
-    print(get_epilog())
-    print(f'Time Elapsed (wall clock): {_wall_time} s')
+    logger.info(get_epilog())
+    logger.info(f'Time Elapsed (wall clock): {_wall_time} s')

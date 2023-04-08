@@ -2,6 +2,11 @@ from typing import List
 from reader import BitReader
 from writer import BitWriter
 import os
+import json
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger('vault-logger')
 
 #Markers that are supported for JPEG/JFIF
 supportedMarkers = {
@@ -37,30 +42,35 @@ unsupportedMarkers = {
     0xDF: 'Expand Reference Component'
 }
 
-def loadJPEG(filename: str) -> List[int]:
-
+def loadJPEG(filename: str) -> bytearray:
     try:
         with open(filename, 'rb+') as f:
             header = f.read(2)
-            marker = (header[0] << 8) + header[1]
-            unsigned_marker = (header[0] & 0xFF) * 256 + (header[1] & 0xFF)
-            if marker != 0xFFD8 and marker not in supportedMarkers:
-                print(unsigned_marker)
-                raise ValueError(f'Error - {filename} file is not a valid JPEG file.')
-            filedata = [header[0], header[1]]
-            while True:
-                chunk_header = f.read(2)
-                if not chunk_header:
-                    break
-                chunk_size = (chunk_header[0] << 8) + chunk_header[1]
-                chunk_data = f.read(chunk_size-2)
-                chunk = chunk_header + chunk_data
-                filedata.extend(chunk)
-            
-            return filedata
+            if len(header) < 2:
+                raise RuntimeError(f' {os.path.basename(filename)} is empty and file is not a valid JPEG file.')
+            else:
+                marker = (header[0] << 8) + header[1]
+                unsigned_marker = (header[0] & 0xFF) * 256 + (header[1] & 0xFF)
+                if marker != 0xFFD8 and marker not in supportedMarkers:
+                    raise RuntimeError(f' {os.path.basename(filename)} file is not a valid JPEG file.')
+                filedata = [header[0], header[1]]
+                while True:
+                    chunk_header = f.read(2)
+                    if not chunk_header:
+                        break
+                    chunk_size = (chunk_header[0] << 8) + chunk_header[1]
+                    chunk_data = f.read(chunk_size-2)
+                    chunk = chunk_header + chunk_data
+                    filedata.extend(chunk)
+                
+                return filedata
                         
     except FileNotFoundError:
-        print(f'Error - Cannot open {filename} file.')
+        logger.error(f'Error - Cannot open {filename} file.')
+        return None
+
+    except RuntimeError as e:
+        logger.error(str(e))
         return None
 
 class CodeWrapper:
@@ -141,10 +151,14 @@ class Header:
         self.successiveApproxLow: int = 0
 
     def __str__(self) -> str:
+        output = ''
+
+        
+        
         pass
 
     #done
-    def readHeader(self, data: List[int]) -> None:
+    def readHeader(self, data: bytearray) -> None:
 
         """
         Reads the byte in header and checks if byte is in supported/unsupported markers dictionary.
@@ -198,7 +212,7 @@ class Header:
             i += markerLen
             
     #done
-    def createHeaderByte(self, header: List[int]) -> None:
+    def createHeaderByte(self, header: bytearray) -> None:
 
         """
         Adds markers to the header.
@@ -214,15 +228,15 @@ class Header:
             self.writeAPP0(header)
 
         self.writeSOF(header)
-        self.writeHT(header, 0, 0)
-        self.writeHT(header, 0, 1)
-        self.writeHT(header, 1, 0)
-        self.writeHT(header, 1, 1)
-        self.writeQT(header)
+        self.writeDHT(header, 0, 0)
+        self.writeDHT(header, 0, 1)
+        self.writeDHT(header, 1, 0)
+        self.writeDHT(header, 1, 1)
+        self.writeDQT(header)
         self.writeSOS(header)
 
     #done
-    def readMarkerLength(self, data: List[int], start: int) -> int:
+    def readMarkerLength(self, data: bytearray, start: int) -> int:
 
         """
         Retrieves the length of marker by combining two bytes into a single integer that represents the length of the marker.
@@ -240,7 +254,7 @@ class Header:
         return markerLength
 
     #done
-    def readSOS(self, data: List[int], start: int, len: int) -> None:
+    def readSOS(self, data: bytearray, start: int, len: int) -> None:
 
         print('Reading Start of Scan ...')
 
@@ -305,7 +319,7 @@ class Header:
         print('Done.\n-----------------------------------------------')     
 
     #revisit
-    def writeSOS(self, header: List[int]) -> None:
+    def writeSOS(self, header: bytearray) -> None:
 
         """
         Adds StartOfScan marker to the header.
@@ -342,7 +356,7 @@ class Header:
         header.append(0x00)
 
     #done
-    def readSOF(self, data: List[int], start: int, len: int) -> None:
+    def readSOF(self, data: bytearray, start: int, len: int) -> None:
 
         """
         Reads StartOfFrame marker in the header.
@@ -453,7 +467,7 @@ class Header:
         print('\nDone.\n-----------------------------------------------')
 
     #done
-    def writeSOF(self, data: List[int]) -> None:
+    def writeSOF(self, data: bytearray) -> None:
         
         """
         Adds StartOfFrame marker (SOF0)
@@ -494,7 +508,7 @@ class Header:
             data.append(self.components[i].quantizationTableNumber & 0xFF)
 
     #fixed
-    def readDHT(self, data: List[int], start: int, len: int):
+    def readDHT(self, data: bytearray, start: int, len: int):
 
         """
         A single DHT segment may contain multiple Huffman Tables, each with its own information byte.
@@ -555,7 +569,7 @@ class Header:
         print('\nDone.\n-----------------------------------------------')
     
     #done
-    def writeDHT(self, header: List[int], table: int, id: int) -> None:
+    def writeDHT(self, header: bytearray, table: int, id: int) -> None:
         
         #Add Huffman Table marker bytes (FFC4)
         header.append(0xFF)
@@ -586,7 +600,7 @@ class Header:
         pass
     
     #fixed
-    def readDQT(self, data: List[int], start: int, length: int):
+    def readDQT(self, data: bytearray, start: int, length: int):
 
         """
         Reads Quantization Tables from a given file data and append it to an array named quantizationTables
@@ -623,7 +637,7 @@ class Header:
         print('Done.\n-----------------------------------------------')
 
     #revisit
-    def writeDQT(self, header: List[int]) -> None:
+    def writeDQT(self, header: bytearray) -> None:
         
         """
         Iterates over all elements in quantizationTables and appends each element to the header list. 
@@ -631,7 +645,7 @@ class Header:
         for i in self.quantizationTables:
             header.append(i)
 
-    def readAPP0(self, data: List[int], start: int, len: int) -> None:
+    def readAPP0(self, data: bytearray, start: int, len: int) -> None:
         """
         Reads APP0 (JFIF) marker segment
         """
@@ -646,7 +660,7 @@ class Header:
             header.append(i)
         
     #fixed
-    def readDRI(self, data: List[int], start: int, len: int) -> None:
+    def readDRI(self, data: bytearray, start: int, len: int) -> None:
         """
         Reads the Define Restart Interval Segment
         + FFDD : marker
@@ -725,7 +739,7 @@ class JPG:
         pass
     
     #done
-    def readBitstream(self, data: List[int]) -> None:
+    def readBitstream(self, data: bytearray) -> None:
 
         scan = []
         i = self.header.bitstreamIndex
