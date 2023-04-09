@@ -121,6 +121,10 @@ class HuffmanTable:
         self.offsets = [0]*17
         self.codes = [0]*162
         self.set = False
+        self.table_length = 0
+        self.destination_id = 0
+        self.table_type = 0
+        self.numberOfCodes = 0
 
 class StartOfScan:
     def __init__(self) -> None:
@@ -136,8 +140,8 @@ class Header:
         self.startOfFrame = StartOfFrame()
         self.startOfScan = StartOfScan()
         self.components: List[Component] = [Component() for i in range(3)] #list comprehension - creating new Component object on each iteration and appends to the list (Y'CbCr)
-        self.dcHuffmanTables: List[HuffmanTable] = [HuffmanTable() for i in range(len(self.components))]
-        self.acHuffmanTables: List[HuffmanTable] = [HuffmanTable() for i in range(len(self.components))]
+        self.dcHuffmanTables: List[HuffmanTable] = [HuffmanTable() for i in range(2)]
+        self.acHuffmanTables: List[HuffmanTable] = [HuffmanTable() for i in range(2)]
         self.bitstreamIndex = 0
         self.restartInterval = 0
         self.quantizationTables: List[QuantizationTable] = []
@@ -151,11 +155,102 @@ class Header:
         self.successiveApproxLow: int = 0
 
     def __str__(self) -> str:
-        output = ''
 
-        
-        
-        pass
+        #START OF FRAME
+        startOfFramePrecision = self.startOfFrame.precision
+        startOfFrameImageSize = f'{self.startOfFrame.width} x {self.startOfFrame.height}'
+        startOfFrameNumberOfComponents = self.startOfFrame.numOfComponents
+        startOfFrameComponents = list()
+        for sof_component in self.components:
+            if sof_component.identifier == 1:
+                channel = 'Luminance (Y)'
+            elif sof_component.identifier == 2:
+                channel = 'Chroma blue (Cb)'
+            elif sof_component.identifier == 3:
+                channel = 'Chroma red (Cr)'
+            component_dict = {'Component ID': sof_component.identifier, 'Channel': channel ,'Quantization Table ID': sof_component.quantizationTableNumber}
+            startOfFrameComponents.append(component_dict)
+
+        #DEFINE QUANTIZATION TABLE
+        defineQuantizationTables = list()
+        for quantization_table in self.quantizationTables:
+            qt_dict = {
+                'Table Length': quantization_table.length,
+                'Precision': f'{quantization_table.precision} bits',
+                'Destination ID': quantization_table.dest_id,
+                'Quantization Values': f'{quantization_table.table}'
+            }
+            defineQuantizationTables.append(qt_dict)
+
+        #DEFINE HUFFMAN TABLE
+        defineHuffmanTables = list()
+
+        for ac_huffman_table in self.acHuffmanTables:
+            if ac_huffman_table.table_type == 1: table_type = 'AC table' 
+            else: table_type = 'DC table'
+            huffman_symbols = dict()
+            for i in range(16):
+                huffman_symbols[f'{i+1} bits'] = list()
+                for j in range(ac_huffman_table.offsets[i], ac_huffman_table.offsets[i+1]):
+                    huffman_symbols[f'{i+1} bits'].append(format(ac_huffman_table.symbols[j], "02X"))
+
+
+            ac_dict = {
+                'Huffman Table Length': ac_huffman_table.table_length,
+                'Destination ID' : ac_huffman_table.destination_id,
+                'Class' : f'{ac_huffman_table.table_type} ({table_type})',
+                'Total number of codes': ac_huffman_table.numberOfCodes,
+                'Offsets' : f'{ac_huffman_table.offsets}',
+                #implement these
+                'Huffman Codes' : f'{huffman_symbols}'   
+            }
+            defineHuffmanTables.append(ac_dict)
+
+        for dc_huffman_table in self.dcHuffmanTables:
+            if dc_huffman_table.table_type == 1: table_type = 'AC table'
+            else: table_type = 'DC table'
+            dc_dict = {
+                'Huffman Table Length': dc_huffman_table.table_length,
+                'Destination ID': dc_huffman_table.destination_id,
+                'Class': f'{dc_huffman_table.table_type} ({table_type})',
+                'Total number of codes': dc_huffman_table.numberOfCodes,
+                'Offsets': f'{dc_huffman_table.offsets}'
+                #implement these
+                # 'Huffman Codes': f'{}' 
+            }
+            defineHuffmanTables.append(dc_dict)
+
+        #START OF SCAN
+        startOfScanStartOfSelection = self.startOfSelection
+        startOfScanEndOfSelection = self.endOfSeleciton
+        startOfScanSuccessiveApproximation = f'0x{self.successiveApproxHigh, self.successiveApproxLow}'
+        startOfScanImageComponents = list()
+        for i in range(self.startOfFrame.numOfComponents):
+            sos_component = self.components[i]
+            sos_dict = {
+                'Component ID' : sos_component.identifier,
+                'AC Huffman Table ID': sos_component.acHuffmanTableId,
+                'DC Huffman Table ID': sos_component.dcHuffmanTableId
+            }
+            startOfScanImageComponents.append(sos_dict)            
+
+        output = {
+            'Start Of Frame (SOF)': { 
+                'Data Precision': startOfFramePrecision,
+                'Image Size': startOfFrameImageSize,
+                'Number of Colour Components': startOfFrameNumberOfComponents,
+                'Colour Components': startOfFrameComponents
+            },
+            'Start Of Scan (SOS)': {
+                'Components': startOfScanImageComponents,
+                'Spectral selection' : f'{startOfScanStartOfSelection}...{startOfScanEndOfSelection}',
+                'Successive approximation': f'0x{startOfScanSuccessiveApproximation}'
+            },
+            'Define Quantization Tables' : defineQuantizationTables,
+            'Define Huffman Tables' : defineHuffmanTables
+        }
+       
+        return json.dumps(output, indent=4)
 
     #done
     def readHeader(self, data: bytearray) -> None:
@@ -204,8 +299,6 @@ class Header:
                 self.readDQT(data, i, markerLen)
             elif marker == 'JFIF segment marker (APP0)':
                 self.readAPP0(data, i, markerLen)
-            elif marker == 'EXIF segment marker (APP1)':
-                self.readAPP1(data, i, markerLen)
             elif marker in unsupportedMarkers:
                 raise Exception(f"Error: Unsupported marker ({hex(currByte)}) found in file.")
 
@@ -256,7 +349,7 @@ class Header:
     #done
     def readSOS(self, data: bytearray, start: int, len: int) -> None:
 
-        print('Reading Start of Scan ...')
+        logger.info(' Reading Start of Scan (SOS)')
 
         i = start + 2
         currentByte = data[i]
@@ -305,19 +398,8 @@ class Header:
 
         if i != start + len - 1:
             raise Exception('Error - Number of bytes do not equal the length of marker.')
-        self.startOfScan.set = True   
-        
-        print(f'Number of image components: {self.startOfFrame.numOfComponents}\n')
-        for _ in range(self.startOfFrame.numOfComponents):
-            component = self.components[_]
-            ac = component.acHuffmanTableId
-            dc = component.dcHuffmanTableId
-            cid = component.identifier
-            print(f'    Component[{cid}]: table={dc}(DC), {ac}(AC)')
-        
-        print(f'\nSpectral selection: {self.startOfSelection} ... {self.endOfSeleciton}\nSuccessive approximation: 0x{self.successiveApproxHigh}{self.successiveApproxLow}\n')
-        print('Done.\n-----------------------------------------------')     
-
+        self.startOfScan.set = True          
+    
     #revisit
     def writeSOS(self, header: bytearray) -> None:
 
@@ -369,7 +451,7 @@ class Header:
         + Checks length of data read matches the expected length and raises exception if the do not match.
         """
 
-        print('Reading Start Of Frame (SOF0) ...')
+        logger.info(' Reading Start Of Frame (SOF0)')
         i = start + 2
 
         #checks if the data precision is exactly 8 bits and raises exception if not.
@@ -435,7 +517,6 @@ class Header:
             i += 1
             comp.quantizationTableNumber = data[i]
             
-            # i += 1
             if comp.identifier == 4 or comp.identifier == 5:
                 raise Exception(f'Error - YIQ colour mode is not supported. ComponentID: {comp.identifier}')
             if comp.identifier == 0 or comp.identifier > 3:
@@ -454,17 +535,10 @@ class Header:
         else:
             self.components[0].verticalSamplingFactor = 1
             self.components[0].horizontalSamplingFactor = 1
-        
-        
+           
         if i != start + len - 1:
             raise Exception('Incorrect Start of Frame length.')
         self.startOfFrame.set = True
-
-        #printing area
-        print(f'Precision: {self.startOfFrame.precision}\nImage Size: {self.startOfFrame.width} x {self.startOfFrame.height}\nNumber of Image Components: {self.startOfFrame.numOfComponents}')
-        for component in self.components:
-            print(f'    Component ID: {component.identifier}, Quantisation Table ID: {component.quantizationTableNumber}')
-        print('\nDone.\n-----------------------------------------------')
 
     #done
     def writeSOF(self, data: bytearray) -> None:
@@ -522,7 +596,7 @@ class Header:
              (x = total number of codes)
         """
         
-        print('Reading Define Huffman Table ...')
+        logger.info(' Reading Define Huffman Table (DHT)')
         
         hufftable = None
         i = start + 2
@@ -541,8 +615,10 @@ class Header:
 
             if tableType == 0:
                 hufftable = self.dcHuffmanTables[tableId]
+                hufftable.table_type = 0
             elif tableType == 1:
                 hufftable = self.acHuffmanTables[tableId]
+                hufftable.table_type = 1
             else:
                 raise ValueError(f'Error - Wrong huffman table ID: {tableType}')
 
@@ -559,15 +635,13 @@ class Header:
                 i += 1
                 hufftable.symbols[j] = data[i]
 
+            hufftable.numberOfCodes = totalCodes
+            hufftable.table_length = len
+            hufftable.destination_id = tableId
             hufftable.set = True
             getHuffmanCodes(hufftable)
             i += 1
 
-            print(f'Huffman table length: {len}\nDestination ID: {tableId}\nClass: {tableType}\nTotal number of codes: {totalCodes}')
-            print(hufftable.offsets)
-
-        print('\nDone.\n-----------------------------------------------')
-    
     #done
     def writeDHT(self, header: bytearray, table: int, id: int) -> None:
         
@@ -605,7 +679,7 @@ class Header:
         """
         Reads Quantization Tables from a given file data and append it to an array named quantizationTables
         """
-        print('Reading Define Quantization Table (FFDB) ...')
+        logger.info(' Reading Define Quantization Table (FFDB)')
 
         length = data[start + 1]
         table_info = data[start + 2]
@@ -632,10 +706,6 @@ class Header:
         for i in range(start, start + length):
             self.quantizationTablesData.append(data[i])
 
-        for qt in self.quantizationTables:
-            print(f'Table Length: {qt.length}\nPrecision: {qt.precision} bits\nDestination ID: {qt.dest_id}\n    {qt.table}\n')
-        print('Done.\n-----------------------------------------------')
-
     #revisit
     def writeDQT(self, header: bytearray) -> None:
         
@@ -649,10 +719,8 @@ class Header:
         """
         Reads APP0 (JFIF) marker segment
         """
-        print('Reading APP0 (JFIF) Marker ...\n')
-        self.app0Marker = data[start : start + len + 2]
-        print(self.app0Marker)
-        print('\nDone.\n-----------------------------------------------')
+        logger.info('Reading JFIF Segment Marker (APP0)\n')
+        self.app0Marker = data[start : start + len]
 
     def writeAPP0(self, header: bytearray) -> None:   
         header.append(0xFF, 0xE0)
@@ -668,7 +736,7 @@ class Header:
         + XXXX : restart interval
         Not all JPG files have restart intervals.
         """
-        print('Reading Define Restart Interval ...')
+        logger.info('Reading Define Restart Interval (DRI)')
         i  = start + 2
         if len != 4:
             raise ValueError('Error - Wrong length of Restart Interval Marker. Length is not 4.')
@@ -677,9 +745,6 @@ class Header:
 
         i += 1
         self.restartInterval = self.restartInterval | data[i]
-
-        print(f'Restart Interval: {self.restartInterval}\nLength: {len}')
-        print('\nDone.\n-----------------------------------------------')
 
     #fixed
     def convertSymbolToCode(self, symbol: int, isAC: bool, isChrominance: bool, wrapper: CodeWrapper) -> None:
@@ -736,16 +801,14 @@ class JPG:
         self.readBitstream(data)
 
     def __str__(self) -> str:
-        pass
+        return str(self.header)
     
     #done
     def readBitstream(self, data: bytearray) -> None:
 
         scan = []
-        i = self.header.bitstreamIndex
-        
+        i = self.header.bitstreamIndex        
         while i < len(data):
-        # for i in range(self.header.bitstreamIndex, len(data)):
             scan.append(data[i])
             if data[i] == 0xFF:
                 if data[i+1] == 0x00:
@@ -1194,5 +1257,3 @@ def writeToFile(name: str, data: bytes) -> None:
     with open(name, 'wb') as file:
         file.write(data)
 
-# if __name__ == "__main__":
-#     img = JPG('images/bird.jpg')

@@ -46,6 +46,7 @@ mode_group = parser.add_mutually_exclusive_group(required=True)
 mode_group.add_argument('--embed', action='store_true', help='embed text into image')
 mode_group.add_argument('--retrieve', action='store_true', help='retrieve text from image')
 
+parser.add_argument('-i', '--info', action='store_true', help='Print metadata of JPG image being decoded.')
 parser.add_argument('cover_image', action='store', metavar='COVER IMAGE', type=str, help='Path to cover image file [for --embed only]')
 parser.add_argument('text_file', action='store',metavar='TEXT FILE', type=str, help='Path to text file [for --embed only]')
 parser.add_argument('stego_image', action='store',metavar='STEGO IMAGE', type=str, help='Path to stego image file [for --embed | --retrieve]')
@@ -112,7 +113,9 @@ if __name__ == "__main__":
                 _cover_image.inject(args.text_file)
                 # printMCU(_cover_image.MCUVector[-1])
 
-                print("Stego image is saved to {args.stego_image}\n")
+            if args.info:
+                logger.info(f' Image metadata:\n{str(_cover_image)}\n')
+                # print("Stego image is saved to {args.stego_image}\n")
     
     _wall_time = round(time.time() - start_time, 2)
 
