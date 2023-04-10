@@ -21,7 +21,7 @@ class BitReader:
         self.currBit_ = 0
         self.read_ = False
 
-    def readNextBits(self, n: int = 1) -> int:
+    def readNextBit(self, n: int = 1) -> int:
         result = 0
         for i in range(n):
             if self.read_:
