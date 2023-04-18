@@ -24,7 +24,7 @@ class CustomHelpFormatter(argparse.HelpFormatter):
  \ \__/    \ \_\ \_\ \ \_____\ \ \_____\   \ \_\ 
   \/_/      \/_/\/_/  \/_____/  \/_____/    \/_/
 
-Vault.© 2023 By Ali Coskun    
+Vault. v1.0 Apr 2023 By Ali Coskun    
     """
         super().__init__(prog, indent_increment, max_help_position, width)
 

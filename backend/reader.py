@@ -15,7 +15,6 @@ class BitReader:
     + skipToNextByte(self): skips rest of the bits in the current byte and starts the next read operation
     from the most significant (MSB) bit of the next byte.
     """
-    #matt passes the data with reference ??
     def __init__(self, data: List[np.uint8], startByte = np.uint8(0)) -> None:
         self.data_ = data
         self.currByte_ = np.uint8(startByte)

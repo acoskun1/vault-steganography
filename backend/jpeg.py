@@ -953,9 +953,8 @@ class JPG:
 
     def getNextCoeffExtract(self) -> int:
         
-        #issue happens here
         if self.currMCU >= len(self.MCUVector):
-            return
+            raise RuntimeError("Index of coefficient read is out of range.")
         
         if self.currChannelType:
             i = self.MCUVector[self.currMCU].luminance[self.currChannel].acCoeff[self.Coefficient]
@@ -996,16 +995,17 @@ class JPG:
 
         if self.currChannelType:
             val = self.MCUVector[self.currMCU].luminance[self.currChannel].acCoeff[self.Coefficient]
-            # self.Coefficient += 1
-            # self.Coefficient = self.Coefficient % 63
-            # idx = self.MCUVector[self.currMCU].luminance[self.currChannel].acCoeff.index(val)
-            # ch = True
+            idx = self.Coefficient
+            ch = True
+            channel = self.currChannel
+            mcu = self.currMCU
+
         else:
             val = self.MCUVector[self.currMCU].chrominance[self.currChannel].acCoeff[self.Coefficient]
-            # self.Coefficient += 1
-            # self.Coefficient = self.Coefficient % 63
-            # idx = self.MCUVector[self.currMCU].chrominance[self.currChannel].acCoeff.index(val)
-            # ch = False
+            idx = self.Coefficient
+            ch = False
+            channel = self.currChannel
+            mcu = self.currMCU
 
         self.Coefficient += 1
         self.Coefficient = self.Coefficient % 63
@@ -1026,7 +1026,7 @@ class JPG:
         if self.Coefficient == 0 and self.currChannel == 0 and self.currChannelType:
             self.currMCU += 1
         
-        return (self.Coefficient, val, self.currChannelType)
+        return (idx, val, ch, channel, mcu)
     
     #done
     def readNextMCU(self, mcu: MinimumCodedUnit, bit: BitReader, finalDcCoeff: int) -> None:
@@ -1110,7 +1110,6 @@ class JPG:
         self.makeNewBitstream(_bytes)
         _bytes.append(0xFF) 
         _bytes.append(0xD9)
-        # print(_bytes)
         writeToFile(name, _bytes)
 
     #done
@@ -1127,10 +1126,8 @@ class JPG:
             file_data = f.read()
             file_bytes = bytearray(file_data)
             
-
         # prepFileToInject(file_bytes, filename)
         file_bytes = prepFileToInject(file_bytes, filename)
-        print(file_bytes)
         if len(file_bytes) * 8 > self.Bits:
             raise RuntimeError(f'{os.path.basename(filename)} cannot be injected. Select a smaller secret file or larger JPG image.')
         
@@ -1138,10 +1135,14 @@ class JPG:
         bitreader = BitReader(file_bytes)
         for i in range(len(file_bytes) * 8):
             tup = self.getNextFreeCoeff()
+            
             coefficient_index = tup[0]
             coefficient_value = tup[1]
             coefficient_value_unsigned = np.array(coefficient_value).astype(dtype=np.uint8)
             luminance = tup[2]
+            channel = tup[3]
+            mcu = tup[4]
+
             bit = bitreader.readNextBit()
             if bit:
                 coefficient_value_unsigned = coefficient_value_unsigned | 0x01
@@ -1150,15 +1151,15 @@ class JPG:
 
             coefficient_value_signed = np.int8(coefficient_value_unsigned)
             if luminance:
-                self.MCUVector[self.currMCU].luminance[self.currChannel].acCoeff[coefficient_index] = coefficient_value_signed
+                self.MCUVector[mcu].luminance[channel].acCoeff[coefficient_index] = coefficient_value_signed
             else:
-                self.MCUVector[self.currMCU].chrominance[self.currChannel].acCoeff[coefficient_index] = coefficient_value_signed
+                self.MCUVector[mcu].chrominance[channel].acCoeff[coefficient_index] = coefficient_value_signed
 
     def recoverHiddenFile(self) -> None:
         secretData: bytearray = []
         self.extractFromJPG(secretData)
         filename = removeNameFromFileData(secretData)
-        writeToFile(filename, secretData)
+        writeToFile(filename, bytes(secretData))
 
 def printBlock(channel: Channel) -> None:
     print('DC: ', channel.dcCoeff)
@@ -1204,10 +1205,9 @@ def getMinBinaryLength(number: int) -> int:
     return length
 
 def prepFileToInject(filedata: bytearray, filename: str) -> bytearray:
-    # filename = os.path.basename(filename)
-    found = max(filename.rfind('/'), filename.rfind('\\')) + 1
-    filename = filename[found:]
+    filename = os.path.basename(filename)
     filedata.append(ord('/'))
+
     for char in filename:
         filedata.append(ord(char))
 
@@ -1216,7 +1216,6 @@ def prepFileToInject(filedata: bytearray, filename: str) -> bytearray:
     for i in range(4):
         _byte = (datasize >> (8 * i))
         filedata.insert(0, _byte)
-    
     return filedata
 
 def createHuffmanTable(huffman_table: HuffmanTable, type: str, component: str) -> None:
