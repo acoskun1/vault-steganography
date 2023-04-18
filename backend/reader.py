@@ -1,4 +1,5 @@
 from typing import List
+import numpy as np
 
 class BitReader:
 
@@ -14,15 +15,16 @@ class BitReader:
     + skipToNextByte(self): skips rest of the bits in the current byte and starts the next read operation
     from the most significant (MSB) bit of the next byte.
     """
-    
-    def __init__(self, data: List[int], startByte: int = 0) -> None:
+    #matt passes the data with reference ??
+    def __init__(self, data: List[np.uint8], startByte = np.uint8(0)) -> None:
         self.data_ = data
-        self.currByte_ = startByte
+        self.currByte_ = np.uint8(startByte)
         self.currBit_ = 0
         self.read_ = False
 
-    def readNextBit(self, n: int = 1) -> int:
-        result = 0
+    def readNextBit(self, n = 1) -> int:
+        result = np.uint8(0)
+        currByte = None
         for i in range(n):
             if self.read_:
                 break

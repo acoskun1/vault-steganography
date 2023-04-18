@@ -4,6 +4,8 @@ from writer import BitWriter
 import os
 import json
 import logging
+import numpy as np
+import PIL
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('vault-logger')
@@ -12,7 +14,6 @@ logger = logging.getLogger('vault-logger')
 supportedMarkers = {
     0xD8: 'Start of Image (SOI)',
     0xE0: 'JFIF segment marker (APP0)',
-    0xE1: 'EXIF segment marker (APP1)',
     0xDB: 'Define Quantization Table (DQT)',
     0xC0: 'Start of Frame (SOF)',
     0xC4: 'Define Huffman Table (DHT)',
@@ -62,7 +63,7 @@ def loadJPEG(filename: str) -> bytearray:
                     chunk_data = f.read(chunk_size-2)
                     chunk = chunk_header + chunk_data
                     filedata.extend(chunk)
-                
+
                 return filedata
                         
     except FileNotFoundError:
@@ -74,7 +75,7 @@ def loadJPEG(filename: str) -> bytearray:
         return None
 
 class CodeWrapper:
-    def __init__(self, code: int, length: int) -> None:
+    def __init__(self, code: int = 0, length: int = 0) -> None:
         self.code: int = code
         self.length: int = length
 
@@ -146,8 +147,7 @@ class Header:
         self.restartInterval = 0
         self.quantizationTables: List[QuantizationTable] = []
         self.quantizationTablesData: List[int] = []
-        self.app0Marker = []
-        self.app1Marker = []
+        self.app0Marker: bytearray = []
         self.zeroBased: bool = False
         self.startOfSelection: int = 0
         self.endOfSeleciton: int = 0
@@ -188,11 +188,11 @@ class Header:
         for ac_huffman_table in self.acHuffmanTables:
             if ac_huffman_table.table_type == 1: table_type = 'AC table' 
             else: table_type = 'DC table'
-            huffman_symbols = dict()
+            ac_huffman_symbols = dict()
             for i in range(16):
-                huffman_symbols[f'{i+1} bits'] = list()
+                ac_huffman_symbols[f'{i+1} bits'] = list()
                 for j in range(ac_huffman_table.offsets[i], ac_huffman_table.offsets[i+1]):
-                    huffman_symbols[f'{i+1} bits'].append(format(ac_huffman_table.symbols[j], "02X"))
+                    ac_huffman_symbols[f'{i+1} bits'].append(format(ac_huffman_table.symbols[j], "02X"))
 
 
             ac_dict = {
@@ -201,22 +201,26 @@ class Header:
                 'Class' : f'{ac_huffman_table.table_type} ({table_type})',
                 'Total number of codes': ac_huffman_table.numberOfCodes,
                 'Offsets' : f'{ac_huffman_table.offsets}',
-                #implement these
-                'Huffman Codes' : f'{huffman_symbols}'   
+                'Huffman Codes' : f'{ac_huffman_symbols}'   
             }
             defineHuffmanTables.append(ac_dict)
 
         for dc_huffman_table in self.dcHuffmanTables:
             if dc_huffman_table.table_type == 1: table_type = 'AC table'
             else: table_type = 'DC table'
+            dc_huffman_symbols = dict()
+            for x in range(16):
+                dc_huffman_symbols[f'{x+1} bits'] = list()
+                for y in range(dc_huffman_table.offsets[x], dc_huffman_table.offsets[x+1]):
+                    dc_huffman_symbols[f'{x+1} bits'].append(format(dc_huffman_table.symbols[y], "02X"))
+            
             dc_dict = {
                 'Huffman Table Length': dc_huffman_table.table_length,
                 'Destination ID': dc_huffman_table.destination_id,
                 'Class': f'{dc_huffman_table.table_type} ({table_type})',
                 'Total number of codes': dc_huffman_table.numberOfCodes,
-                'Offsets': f'{dc_huffman_table.offsets}'
-                #implement these
-                # 'Huffman Codes': f'{}' 
+                'Offsets': f'{dc_huffman_table.offsets}',
+                'Huffman Codes': f'{dc_huffman_symbols}' 
             }
             defineHuffmanTables.append(dc_dict)
 
@@ -254,13 +258,11 @@ class Header:
 
     #done
     def readHeader(self, data: bytearray) -> None:
-
         """
         Reads the byte in header and checks if byte is in supported/unsupported markers dictionary.
         If byte in unsupportedMarkers, raise error.
         If byte is supported, skip it.
         """
-
         #iterate through the data array and check if startOfScan attribute of the class has been set.
         #if SOS set, bitstreamIdx is set to current index i and exit loop.
         #finds the starting index of the bitstream in data array after SOS is found.
@@ -286,7 +288,6 @@ class Header:
             i += 1    
             markerLen = self.readMarkerLength(data, i)
             marker = supportedMarkers.get(currByte)
-
             if marker == 'Start of Frame (SOF)':
                 self.readSOF(data, i, markerLen)
             elif marker == 'Start of Scan (SOS)':
@@ -350,7 +351,6 @@ class Header:
     def readSOS(self, data: bytearray, start: int, len: int) -> None:
 
         logger.info(' Reading Start of Scan (SOS)')
-
         i = start + 2
         currentByte = data[i]
 
@@ -414,23 +414,22 @@ class Header:
         #add marker FFDA
         header.append(0xFF)
         header.append(0xDA)
-
-        #add lenght - must be 6+2*(number of components in scan)
+        #add length - must be 6+2*(number of components in scan)
         header.append(0x00)
-        header.append((6 + (2 * self.startOfFrame.numOfComponents)) & 0xFF)
-        
+        header.append(6 + (2 * self.startOfFrame.numOfComponents))
         #add number of components in scan.
         header.append(self.startOfFrame.numOfComponents)
 
         #for each component add component id and huffmantable to use
         for i in range(self.startOfFrame.numOfComponents):
             header.append(self.components[i].identifier)
-            j = (self.components[i].dcHuffmanTableId << 4) | self.components[i].acHuffmanTableId
-            header.append(j & 0xff)
-
+            j = self.components[i].dcHuffmanTableId
+            j = j << 4
+            j = j | self.components[i].acHuffmanTableId
+            header.append(j)
         #3 bytes to be ignored
         header.append(0x00)
-        header.append(0x00)
+        header.append(0x3F)
         header.append(0x00)
 
     #done
@@ -533,7 +532,6 @@ class Header:
         
         """
         Adds StartOfFrame marker (SOF0)
-
         + Pushes SOF0 marker by appending (0xFF, and 0xC0) into the data array.
         + First byte of length of the marker segment (0x00).
         + Depending on the number of components in the image, pushes back the second byte of the length marker
@@ -544,16 +542,13 @@ class Header:
         + Number of components in the image
         + Iterate through the components for the number of components, and pushes the identifier, sampling factors and quantization table number of the component.
         """
-        
         data.append(0xFF)
         data.append(0xC0)
         data.append(0x00)
-        
         if self.startOfFrame.numOfComponents == 1:
             data.append(0x0B)
         else:
             data.append(0x11)
-        
         data.append(0x08)
         data.append((self.startOfFrame.height >> 8) & 0xFF)
         data.append((self.startOfFrame.height) & 0xFF)
@@ -562,10 +557,9 @@ class Header:
         data.append(self.startOfFrame.numOfComponents & 0xFF)
 
         for i in range(self.startOfFrame.numOfComponents):
+            data.append(self.components[i].identifier & 0xFF)
             c = (self.components[i].horizontalSamplingFactor & 0x0F) << 4
             c = c | (self.components[i].verticalSamplingFactor & 0x0F)
-            data.append(self.components[i].identifier & 0xFF)
-
             data.append(c)
             data.append(self.components[i].quantizationTableNumber & 0xFF)
 
@@ -628,35 +622,38 @@ class Header:
             i += 1
 
     #done
-    def writeDHT(self, header: bytearray, table: int, id: int) -> None:
+    def writeDHT(self, data: bytearray, table: int, id: int) -> None:
         
         #Add Huffman Table marker bytes (FFC4)
-        header.append(0xFF)
-        header.append(0xC4)
-
-        header.append(0x00)
+        data.append(0xFF)
+        data.append(0xC4)
+        data.append(0x00)
+        
         if table:
-            header.append(0xB5)
+            data.append(0xB5)
         else:
-            header.append(0x1F)
+            data.append(0x1F)
 
-        i = table << 4
-        i = i | (table & 0x0F)
-        header.append(i)
+        i = table
+        i = i << 4
+        i = i | (id & 0x0F)
+        data.append(i)
+        
+        huffTable = None
         if table:
             huffTable = self.acHuffmanTables[id]
         else:
             huffTable = self.dcHuffmanTables[id]
         
-        total = 0
+        total_codes = 0
+        number_of_codes = 0
         for j in range(16):
-            codes = huffTable.offsets[i+1] - huffTable.offsets[i]
-            total += codes
-            header.append(codes & 0xFF)
+            number_of_codes = huffTable.offsets[j+1] - huffTable.offsets[j]
+            total_codes += number_of_codes
+            data.append(number_of_codes & 0xFF)
 
-        for j in range(codes):
-            header.append(huffTable.symbols[i])
-        pass
+        for j in range(total_codes):
+            data.append(huffTable.symbols[j])
     
     #fixed
     def readDQT(self, data: bytearray, start: int, length: int):
@@ -695,18 +692,19 @@ class Header:
         """
         Iterates over all elements in quantizationTables and appends each element to the header list. 
         """
-        for i in self.quantizationTables:
+        for i in self.quantizationTablesData:
             header.append(i)
 
     def readAPP0(self, data: bytearray, start: int, len: int) -> None:
         """
         Reads APP0 (JFIF) marker segment
         """
-        logger.info('Reading JFIF Segment Marker (APP0)\n')
+        logger.info(' Reading JFIF Segment Marker (APP0)')
         self.app0Marker = data[start : start + len]
 
     def writeAPP0(self, header: bytearray) -> None:   
-        header.append(0xFF, 0xE0)
+        header.append(0xFF)
+        header.append(0xE0)
         for i in self.app0Marker:
             header.append(i)
         
@@ -729,12 +727,16 @@ class Header:
         self.restartInterval = self.restartInterval | data[i]
 
     def convertSymbolToCode(self, symbol: int, isAC: bool, isChrominance: bool, wrapper: CodeWrapper) -> None:
-        ht = self.acHuffmanTables[isChrominance] if isAC else self.dcHuffmanTables[isChrominance]
+        huffman_table = None
+        if isAC:
+            huffman_table = self.acHuffmanTables[isChrominance]
+        else:
+            huffman_table = self.dcHuffmanTables[isChrominance]
 
         for offset in range(16):
-            for codeIndex in range(ht.offsets[offset], ht.offsets[offset + 1]):
-                if ht.symbols[codeIndex] == symbol:
-                    wrapper.code = ht.codes[codeIndex]
+            for codeIndex in range(huffman_table.offsets[offset], huffman_table.offsets[offset + 1]):
+                if huffman_table.symbols[codeIndex] == symbol:
+                    wrapper.code = huffman_table.codes[codeIndex]
                     wrapper.length = offset + 1
                     return
         
@@ -742,15 +744,16 @@ class Header:
         raise RuntimeError(message)
 
     def fillHeaderBytes(self, header: bytearray) -> None:
-        
         # add StartOfImage marker (FFD8)
-        header.append(0xFF, 0xD8)
+        header.append(0xFF) 
+        header.append(0xD8)
 
         # write JFIF APP0 segment marker
         if len(self.app0Marker) > 0:
             self.writeAPP0(header)
 
-        # write EXIF APP1 segment and more.
+        # write Define Quantization Table marker
+        self.writeDQT(header)
 
         # write StartOfFrame markers
         self.writeSOF(header)
@@ -760,9 +763,6 @@ class Header:
         self.writeDHT(header, 0, 1)
         self.writeDHT(header, 1, 0)
         self.writeDHT(header, 1, 1)
-
-        # write Define Quantization Table marker
-        self.writeDQT(header)
 
         # write StartOfScan marker
         self.writeSOS(header)
@@ -846,7 +846,6 @@ class JPG:
                 coefficient_read += 16
                 continue
             else:
-                # The problem is here in coeffRead. It hits 64 which makes it out of bounds.
                 coefficient_length = symbol & 0x0F
                 zeros = (symbol >> 4) & 0x0F
                 coefficient_read += zeros
@@ -871,28 +870,27 @@ class JPG:
 
         coefficient = channel.dcCoeff
         coefficientLength = getMinBinaryLength(coefficient)
-
         symbol = 0x00 | coefficientLength
         self.header.convertSymbolToCode(symbol, False, isChrominance, codeWrapper)
-        bw.write(codeWrapper.code, codeWrapper.length)
+        bw.write_int(codeWrapper.code, codeWrapper.length)
 
         if coefficient < 0:
             coefficient = coefficient - 1
-        bw.write(coefficient, coefficientLength)
+        bw.write_int(coefficient, coefficientLength)
         
         for j in range(63):
             coefficient = channel.acCoeff[j]
 
             if j == 62 and coefficient == 0:
                 self.header.convertSymbolToCode(0x00, True, isChrominance, codeWrapper)
-                bw.write(codeWrapper.code, codeWrapper.length)
+                bw.write_int(codeWrapper.code, codeWrapper.length)
                 break
             elif coefficient == 0:
                 zeroCount += 1
             else:
                 while zeroCount >= 16:
                     self.header.convertSymbolToCode(0xF0, True, isChrominance, codeWrapper)
-                    bw.write(codeWrapper.code, codeWrapper.length)
+                    bw.write_int(codeWrapper.code, codeWrapper.length)
                     zeroCount -= 16
 
                 
@@ -901,15 +899,15 @@ class JPG:
                 symbol = symbol << 4
                 symbol = symbol | coefficientLength
                 self.header.convertSymbolToCode(symbol, True, isChrominance, codeWrapper)
-                bw.write(codeWrapper.code, codeWrapper.length)
+                bw.write_int(codeWrapper.code, codeWrapper.length)
 
                 if coefficient < 0:
                     coefficient = coefficient - 1
-                bw.write(coefficient, coefficientLength)
+                bw.write_int(coefficient, coefficientLength)
 
                 zeroCount = 0
         
-    #done - assumption of index 0 - Luminance
+    #done
     def writeMCUtoBitstream(self, mcu: MinimumCodedUnit, bitwriter: BitWriter) -> None:
         number_of_luminance_components: int = self.header.components[0].horizontalSamplingFactor * self.header.components[0].verticalSamplingFactor
         for i in range(number_of_luminance_components):
@@ -947,30 +945,74 @@ class JPG:
         
         return huffmanTable.symbols[codeIdx]
 
-    #done
-    def getNextFreeCoeff(self) -> int:
-        i = self.getNextCoeff()
+    def getNextFreeCoeffExtract(self) -> int:
+        i = self.getNextCoeffExtract()
         while i == 0 or i == 1:
-            i = self.getNextCoeff()
+            i = self.getNextCoeffExtract()
         return i
 
-    #done
-    def getNextCoeff(self) -> int:
+    def getNextCoeffExtract(self) -> int:
         
-        if self.currMCU >= len(self.MCUVector): 
-            raise RuntimeError("Index of coefficient read is out of range.")
+        #issue happens here
+        if self.currMCU >= len(self.MCUVector):
+            return
         
         if self.currChannelType:
             i = self.MCUVector[self.currMCU].luminance[self.currChannel].acCoeff[self.Coefficient]
         else:
             i = self.MCUVector[self.currMCU].chrominance[self.currChannel].acCoeff[self.Coefficient]
         
+        self.Coefficient = (self.Coefficient + 1) % 63
+        
+        if self.Coefficient == 0:
+            if self.currChannelType:
+                mod = self.header.components[0].horizontalSamplingFactor * self.header.components[0].verticalSamplingFactor
+                self.currChannel = (self.currChannel + 1) % mod
+                if self.currChannel == 0:
+                    self.currChannelType = False
+            else:
+                self.currChannel = (self.currChannel + 1) % 2
+                if self.currChannel == 0:
+                    self.currChannelType = True
+        
+        if self.Coefficient == 0 and self.currChannelType and self.currChannel == 0:
+            self.currMCU += 1
+        
+        return i
+
+    #done
+    def getNextFreeCoeff(self) -> tuple:
+        # tup = (index,value)
+        tup = self.getNextCoeff()
+        while tup[1] == 0 or tup[1] == 1:
+            tup = self.getNextCoeff() 
+        return tup 
+
+    #done
+    def getNextCoeff(self) -> tuple:
+
+        if self.currMCU >= len(self.MCUVector):
+            raise RuntimeError("Index of coefficient read is out of range.")
+
+        if self.currChannelType:
+            val = self.MCUVector[self.currMCU].luminance[self.currChannel].acCoeff[self.Coefficient]
+            # self.Coefficient += 1
+            # self.Coefficient = self.Coefficient % 63
+            # idx = self.MCUVector[self.currMCU].luminance[self.currChannel].acCoeff.index(val)
+            # ch = True
+        else:
+            val = self.MCUVector[self.currMCU].chrominance[self.currChannel].acCoeff[self.Coefficient]
+            # self.Coefficient += 1
+            # self.Coefficient = self.Coefficient % 63
+            # idx = self.MCUVector[self.currMCU].chrominance[self.currChannel].acCoeff.index(val)
+            # ch = False
+
         self.Coefficient += 1
         self.Coefficient = self.Coefficient % 63
 
         if self.Coefficient == 0:
             if self.currChannelType:
-                mod: int = self.header.components[self.currChannel].horizontalSamplingFactor * self.header.components[self.currChannel].verticalSamplingFactor
+                mod = self.header.components[0].horizontalSamplingFactor * self.header.components[0].verticalSamplingFactor
                 self.currChannel += 1
                 self.currChannel = self.currChannel % mod
                 if self.currChannel == 0:
@@ -984,7 +1026,7 @@ class JPG:
         if self.Coefficient == 0 and self.currChannel == 0 and self.currChannelType:
             self.currMCU += 1
         
-        return i
+        return (self.Coefficient, val, self.currChannelType)
     
     #done
     def readNextMCU(self, mcu: MinimumCodedUnit, bit: BitReader, finalDcCoeff: int) -> None:
@@ -1006,69 +1048,111 @@ class JPG:
     def extractFromJPG(self, secretData: bytearray) -> None:
 
         self.resetCurr()
-
-        size: int = 0
-        c: int
-        byte: int = 0x00
+        size_of_secret_file: int = 0
+        coefficient_value = 0
+        _byte = np.array(0x00).astype(dtype=np.uint32)
 
         for i in range(32):
-            c = self.getNextFreeCoeff()
-            size = size << 1
-            size = size | (c & 0x01)
-        
-        for i in range(1, size * 8 + 1):
-            c = self.getNextFreeCoeff()
-            byte = byte << 1
-            byte = byte | (c & 0x01)
+            coefficient_value = self.getNextFreeCoeffExtract()
+            if coefficient_value is not None:
+                coefficient_value_unsigned = np.array(coefficient_value).astype(dtype=np.uint32)
+                
+                size_of_secret_file = size_of_secret_file << 1
+
+                coefficient_value_signed = np.array(coefficient_value_unsigned & 0x01).astype(dtype=np.int32)
+                # size_of_secret_file = size_of_secret_file | (coefficient_value_unsigned & 0x01)
+                size_of_secret_file = size_of_secret_file | coefficient_value_signed
+            else:
+                break
             
-            if (i % 8 == 0):
-                secretData.append(byte)
-                byte = 0x00
+        for i in range(1, ((size_of_secret_file * 8) + 1)):
+            coefficient_value = self.getNextFreeCoeffExtract()
+            if coefficient_value is not None:
+                coefficient_value_unsigned = np.array(coefficient_value).astype(dtype=np.uint32)
+            
+                _byte = _byte << 1
+                coefficient_value_signed = np.array(coefficient_value_unsigned & 0x01).astype(dtype=np.int32)
+                _byte = _byte | coefficient_value_signed
+
+                if (i % 8 == 0):
+                    secretData.append(_byte)
+                    _byte = 0x00
+            else:
+                break
 
     #done
     def saveJPGData(self, name: str) -> None:
-        
         '''
         Saves current JPEG image in memory to a file with the given name.
-
         + creates huffman tables for color components. (dc coefficients and ac coefficients use separate huffman tables.)
         + updates the dcHuffmanTables and acHuffmanTables members of the header object with four huffman tables created.
         + creates new bitstream  and adds the end of image marker bytes (FFD9) to the end of bitstream.
         + saves the new bitstream to a file with given name.
         '''
         dcLuminance = HuffmanTable()
-        acLuminance = HuffmanTable()
         dcChrominance = HuffmanTable()
+        acLuminance = HuffmanTable()
         acChrominance = HuffmanTable()
         
         createHuffmanTable(dcLuminance, 'dc', 'lum')
         createHuffmanTable(acLuminance, 'ac', 'lum')
-        createHuffmanTable(dcLuminance, 'dc', 'chr')
-        createHuffmanTable(acLuminance, 'ac', 'chr')
+        createHuffmanTable(dcChrominance, 'dc', 'chr')
+        createHuffmanTable(acChrominance, 'ac', 'chr')
 
         self.header.dcHuffmanTables[0] = dcLuminance
         self.header.dcHuffmanTables[1] = dcChrominance
         self.header.acHuffmanTables[0] = acLuminance
         self.header.acHuffmanTables[1] = acChrominance
 
-        _bytes: bytearray = []
+        _bytes = bytearray()
         self.header.fillHeaderBytes(_bytes)
         
         self.makeNewBitstream(_bytes)
-        
-        _bytes.append(0xFF, 0xD9)
+        _bytes.append(0xFF) 
+        _bytes.append(0xD9)
+        # print(_bytes)
         writeToFile(name, _bytes)
 
     #done
     def makeNewBitstream(self, bitstream: bytearray) -> None:
-
         bitwriter = BitWriter()
         for i in range(len(self.MCUVector)):
             self.writeMCUtoBitstream(self.MCUVector[i], bitwriter)
-        bitwriter.copy(bitstream, True)
+        bitwriter.copy(bitstream)
 
     def inject(self, filename: str) -> None:
-        pass
+        #opens the secretFile in binary mode, creates an immutable bytes object
+        # file_data - immutable bytes object is converted to mutable bytearray object.
+        with open(filename, 'rb') as f:
+            file_data = f.read()
+            file_bytes = bytearray(file_data)
+            
+
+        # prepFileToInject(file_bytes, filename)
+        file_bytes = prepFileToInject(file_bytes, filename)
+        print(file_bytes)
+        if len(file_bytes) * 8 > self.Bits:
+            raise RuntimeError(f'{os.path.basename(filename)} cannot be injected. Select a smaller secret file or larger JPG image.')
+        
+        #creates a bitreader object from the secretFile bytes.
+        bitreader = BitReader(file_bytes)
+        for i in range(len(file_bytes) * 8):
+            tup = self.getNextFreeCoeff()
+            coefficient_index = tup[0]
+            coefficient_value = tup[1]
+            coefficient_value_unsigned = np.array(coefficient_value).astype(dtype=np.uint8)
+            luminance = tup[2]
+            bit = bitreader.readNextBit()
+            if bit:
+                coefficient_value_unsigned = coefficient_value_unsigned | 0x01
+            else:
+                coefficient_value_unsigned = coefficient_value_unsigned & 0xFFFFFFFE
+
+            coefficient_value_signed = np.int8(coefficient_value_unsigned)
+            if luminance:
+                self.MCUVector[self.currMCU].luminance[self.currChannel].acCoeff[coefficient_index] = coefficient_value_signed
+            else:
+                self.MCUVector[self.currMCU].chrominance[self.currChannel].acCoeff[coefficient_index] = coefficient_value_signed
 
     def recoverHiddenFile(self) -> None:
         secretData: bytearray = []
@@ -1119,15 +1203,21 @@ def getMinBinaryLength(number: int) -> int:
 
     return length
 
-def prepFileToInject(filedata: bytearray, filename: str) -> None:
-    
-    filename = os.path.basename(filename)
+def prepFileToInject(filedata: bytearray, filename: str) -> bytearray:
+    # filename = os.path.basename(filename)
+    found = max(filename.rfind('/'), filename.rfind('\\')) + 1
+    filename = filename[found:]
     filedata.append(ord('/'))
-    filedata.extend([ord(char) for char in filename])
+    for char in filename:
+        filedata.append(ord(char))
+
     datasize = len(filedata)
+    _byte = None
     for i in range(4):
-        _byte = (datasize >> (8 * i)) & 0xFF
+        _byte = (datasize >> (8 * i))
         filedata.insert(0, _byte)
+    
+    return filedata
 
 def createHuffmanTable(huffman_table: HuffmanTable, type: str, component: str) -> None:
 
@@ -1232,7 +1322,6 @@ def removeNameFromFileData(filedata: bytearray) -> str:
     
     return file
 
-def writeToFile(name: str, data: bytes) -> None:
+def writeToFile(name: str, data: bytearray) -> None:
     with open(name, 'wb') as file:
         file.write(data)
-

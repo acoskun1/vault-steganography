@@ -51,7 +51,7 @@ class BitWriter:
             self.write(bool((i >> len - j - 1) & 0x01))
     
     def copy(self, data: List[int]) -> None:
-        for i in self.data:
+        for i in self.data_:
             data.append(i)
             if i == 0xFF:
                 data.append(0x00)
