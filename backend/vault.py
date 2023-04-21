@@ -74,7 +74,10 @@ if __name__ == "__main__":
                 _stego_image = JPG(args.stego_image)
                 if args.meta_data:
                     logger.info(f' Image metadata:\n{str(_stego_image)}\n')      
+                
                 _stego_image.recoverHiddenFile()
+                logger.info(f' Secret file is saved to current working directory. Type ls to see file')
+
 
 
     # embed mode checks
@@ -100,19 +103,18 @@ if __name__ == "__main__":
         elif os.path.isfile(args.stego_image):
             parser.error(f'An image already exists at:\n\n    {args.stego_image}\n\nCannot override image, please specify a different path or name.')
         else:
-            if args.jsteg:
-                print(f"\nEmbedding from {args.secret_file} into {args.cover_image}\n")
-                filedata = loadJPEG(args.cover_image)
-                if filedata == None:
-                    parser.error(f'{args.cover_image} is not a valid JPEG file.')
-                else:
-                    _cover_image = JPG(args.cover_image)
-                    if args.meta_data:
-                        logger.info(f' Image metadata:\n{str(_cover_image)}\n')
+            print(f"\nEmbedding from {args.secret_file} into {args.cover_image}\n")
+            filedata = loadJPEG(args.cover_image)
+            if filedata == None:
+                parser.error(f'{args.cover_image} is not a valid JPEG file.')
+            else:
+                _cover_image = JPG(args.cover_image)
+                if args.meta_data:
+                    logger.info(f' Image metadata:\n{str(_cover_image)}\n')
 
-                    _cover_image.inject(args.secret_file)
-                    _cover_image.saveJPGData(args.stego_image)
-                    logger.info(f' Stego image is saved to {args.stego_image}')
+                _cover_image.inject(args.secret_file)
+                _cover_image.saveJPGData(args.stego_image)
+                logger.info(f' Stego image is saved to {args.stego_image}')
 
                 # printMCU(_cover_image.MCUVector[-1])
 
