@@ -1,5 +1,6 @@
 env/
 backend/images/
 backend/__pycache__
-backend/test.txt
+backend/secret_files
+backend/stego_images
 .vscode/

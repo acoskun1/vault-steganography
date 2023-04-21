@@ -1212,10 +1212,11 @@ def prepFileToInject(filedata: bytearray, filename: str) -> bytearray:
     for char in filename:
         filedata.append(ord(char))
 
-    datasize = len(filedata)
+    datasize = len(filedata) #len(filedata) cannot be 0. 
+
     _byte = None
     for i in range(4):
-        _byte = (datasize >> (8 * i))
+        _byte = (datasize >> (8*i)) & 0xFF
         filedata.insert(0, _byte)
     return filedata
 
