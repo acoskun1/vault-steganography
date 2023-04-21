@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-from jpeg import JPG, loadJPEG, writeToFile, printMCU
-from lsbhide import LSBHide
-from lsbreveal import LSBReveal
+from jpeg import JPG, loadJPEG, printMCU
 from datetime import datetime
 from dateutil import tz
 import argparse
@@ -39,22 +37,18 @@ def get_epilog() -> str:
 
 parser = argparse.ArgumentParser(prog='vault', 
                                  allow_abbrev=False,
-                                 usage='%(prog)s [options] <path_to_cover_image> <path_to_text_file> <path_to_stego_image>', 
-                                 description='Steganography tool for embedding or recovering secret text from/into a JPG image.', 
+                                 usage='%(prog)s [options] <path_to_cover_image> <path_to_secret_file> <path_to_stego_image>', 
+                                 description='Steganography tool for embedding or recovering secret file from/into a JPG image.', 
                                  formatter_class=CustomHelpFormatter,
                                  epilog= get_epilog())
 
 mode_group = parser.add_mutually_exclusive_group(required=True)
-mode_group.add_argument('--embed', action='store_true', help='embed text into image')
-mode_group.add_argument('--retrieve', action='store_true', help='retrieve text from image')
-
-alg_group = parser.add_mutually_exclusive_group(required=True)
-alg_group.add_argument('-j', '--jsteg', action='store_true', help='jsteg algorithm to embed/retrieve file')
-alg_group.add_argument('-L', '--lsb', action='store_true', help='lsb algorithm to embed/retrieve file')
+mode_group.add_argument('--embed', action='store_true', help='embed file into image')
+mode_group.add_argument('--retrieve', action='store_true', help='retrieve file from image')
 
 parser.add_argument('-m', '--meta-data', action='store_true', help='return metadata of JPG image being decoded.')
 parser.add_argument('cover_image', action='store', metavar='COVER IMAGE', nargs='?', default=None, type=str, help='Path to cover image file [for --embed only]')
-parser.add_argument('text_file', action='store',metavar='TEXT FILE', nargs='?', default=None, type=str, help='Path to text file [for --embed only]')
+parser.add_argument('secret_file', action='store',metavar='SECRET FILE', nargs='?', default=None, type=str, help='Path to secret file [for --embed only]')
 parser.add_argument('stego_image', action='store',metavar='STEGO IMAGE', type=str, help='Path to stego image file [for --embed | --retrieve]')
 
 args = parser.parse_args()
@@ -63,39 +57,25 @@ if __name__ == "__main__":
 
     # retrieve mode checks
     if args.retrieve:
-        if args.jsteg:
-            if args.text_file is not None or args.cover_image is not None:
+        if args.secret_file is not None or args.cover_image is not None:
                 parser.error('Only path to stego image can be specified for --retrieve mode')
-            elif args.stego_image is None:
+        elif args.stego_image is None:
                 parser.error('Path to stego image not specified. Please specify the path of stego image.')
-            elif not os.path.exists(os.path.dirname(args.stego_image)):
+        elif not os.path.exists(os.path.dirname(args.stego_image)):
                 parser.error(f'Path to stego image directory does not exist:\n\n    {os.path.dirname(args.stego_image)}\n\nPlease specify a valid path or directory.')
-            elif not os.path.isfile(args.stego_image):
+        elif not os.path.isfile(args.stego_image):
                 parser.error(f'Stego image file cannot be located at:\n\n    {args.stego_image}\n\nPlease specify a valid path or stego image.')
-            else:
-                if args.jsteg:
-                    print(f"Recovering file from image {args.stego_image}.")
-                    filedata = loadJPEG(args.stego_image)
-                    if filedata == None:
-                        parser.error(f'{args.stego_image} is not a valid JPEG file.')
-                    else:
-                        _stego_image = JPG(args.stego_image)
-                        if args.meta_data:
-                            logger.info(f' Image metadata:\n{str(_stego_image)}\n')
-                        
-                        _stego_image.recoverHiddenFile()
-
-        if args.lsb:
+        else:
             print(f"Recovering file from image {args.stego_image}.")
-            print(args)
-            _stego_image = JPG(args.stego_image)
-            if args.meta_data:
-                logger.info(f' Image metadata:\n{str(_stego_image)}\n')
-            
-            _steg = LSBReveal(args.stego_image)
-            _steg.reveal(args.text_file)
+            filedata = loadJPEG(args.stego_image)
+            if filedata == None:
+                parser.error(f'{args.stego_image} is not a valid JPEG file.')
+            else:
+                _stego_image = JPG(args.stego_image)
+                if args.meta_data:
+                    logger.info(f' Image metadata:\n{str(_stego_image)}\n')      
+                _stego_image.recoverHiddenFile()
 
-            # _stego_image.recoverHiddenFile()
 
     # embed mode checks
     if args.embed:
@@ -106,13 +86,12 @@ if __name__ == "__main__":
         elif not os.path.isfile(args.cover_image):
             parser.error(f'Cover image file cannot be located at:\n\n    {args.cover_image}\n\nPlease specify a valid path and image.')
 
-        elif args.text_file is None:
+        elif args.secret_file is None:
             parser.error('Path to text file is not specified.')
-        elif not os.path.exists(os.path.dirname(args.text_file)):
-            parser.error(f'Path to text file directory does not exist:\n\n    {os.path.dirname(args.text_file)}\n\nPlease specify a valid path or directory.')
-        elif not os.path.isfile(args.text_file):
-            parser.error(f'Text file cannot be located at:\n\n    {args.text_file}\n\nPlease specify a valid path or text file.')
-
+        elif not os.path.exists(os.path.dirname(args.secret_file)):
+            parser.error(f'Path to text file directory does not exist:\n\n    {os.path.dirname(args.secret_file)}\n\nPlease specify a valid path or directory.')
+        elif not os.path.isfile(args.secret_file):
+            parser.error(f'Text file cannot be located at:\n\n    {args.secret_file}\n\nPlease specify a valid path or text file.')
 
         elif args.stego_image is None:
             parser.error('Path to save the stego image is not specified.')
@@ -122,7 +101,7 @@ if __name__ == "__main__":
             parser.error(f'An image already exists at:\n\n    {args.stego_image}\n\nCannot override image, please specify a different path or name.')
         else:
             if args.jsteg:
-                print(f"\nEmbedding from {args.text_file} into {args.cover_image}\n")
+                print(f"\nEmbedding from {args.secret_file} into {args.cover_image}\n")
                 filedata = loadJPEG(args.cover_image)
                 if filedata == None:
                     parser.error(f'{args.cover_image} is not a valid JPEG file.')
@@ -131,21 +110,10 @@ if __name__ == "__main__":
                     if args.meta_data:
                         logger.info(f' Image metadata:\n{str(_cover_image)}\n')
 
-                    _cover_image.inject(args.text_file)
+                    _cover_image.inject(args.secret_file)
                     _cover_image.saveJPGData(args.stego_image)
                     logger.info(f' Stego image is saved to {args.stego_image}')
 
-            if args.lsb:
-                print(f"\nEmbedding from {args.text_file} into {args.cover_image}\n")
-                _cover_image = JPG(args.cover_image)
-                if args.meta_data:
-                    logger.info(f' Image metadata:\n{str(_cover_image)}\n')
-                
-                _steg = LSBHide(args.cover_image, args.text_file)
-                _steg.embed(args.stego_image)
-                logger.info(f' Stego image is saved to {args.stego_image}')
-
-                # logger.info(f' Stego image is saved to {args.stego_image}')
                 # printMCU(_cover_image.MCUVector[-1])
 
     _wall_time = round(time.time() - start_time, 2)

@@ -5,7 +5,6 @@ import os
 import json
 import logging
 import numpy as np
-import PIL
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('vault-logger')
@@ -110,7 +109,7 @@ class QuantizationTable:
 class Channel:
     def __init__(self) -> None:
         self.dcCoeff = 0            #DC coefficient of pixel block
-        self.acCoeff = [0] * 63     #AC coefficients of pixel block
+        self.acCoeff = [0] * 63     #AC coefficients of pixel block 63 because there are 63 AC coefficients and 1 DC coefficient = 64 (8x8 block)
 
     def __str__(self) -> str:
         print(self.acCoeff)
@@ -1161,12 +1160,14 @@ class JPG:
         filename = removeNameFromFileData(secretData)
         writeToFile(filename, bytes(secretData))
 
+# used for debugging. No effect on both embed and retrieve
 def printBlock(channel: Channel) -> None:
     print('DC: ', channel.dcCoeff)
     print('AC: ', end=" ")
     for coeff in channel.acCoeff:
         print(coeff, end=", ")
 
+# used for debugging. No effect on both embed and retrieve
 def printMCU(mcu: MinimumCodedUnit) -> None:
     for channel in mcu.luminance:
         printBlock(channel)
