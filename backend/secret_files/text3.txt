@@ -1,0 +1,25 @@
+I think I am being followed.
+Our conversations might be intercepted, so I had to use vault steganography to communicate with you.
+Yesterday on my way back home I saw a black SUV that kept following me.
+So I had to take the next underground tube to loose my traces.
+
+I got on the Jubilee line and got off at Bermondsey.
+
+So strange when I call people I hear static noises before the call connects, therefore I am suspicious my calls might be tracked.
+I dumped my SIM card just in case.
+I think this is to do with the investigation we are conducting about the cyber attack that happened last week Sunday at 01:00
+Whoever is behind this does not want us to discover where the attack came from and by which malicious hacker group.
+
+I kept a copy of the logs, ids & ips reports, SIEM alerts and anything related to the attack inside a hard drive in my secure room.
+Seems like the attackers used privilege escalation to gain access to the root and left a backdoor open.
+
+To get to the secure room, do the following:
+
+1 - Go to the shed in my back yard
+2 - Open the fuse box and pull down the 2nd and 5th fuses from the left.
+3 - This should open the passage to the basement where the storage is located. Hard drive is in there.
+4 - Password is the name of the famous book George Orwell wrote. (1984)
+
+I am getting out of town for a while. You know what to do. Be careful.
+
+Xenon.
