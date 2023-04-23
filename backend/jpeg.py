@@ -621,7 +621,7 @@ class Header:
             hufftable.table_length = len
             hufftable.destination_id = tableId
             hufftable.set = True
-            getHuffmanCodes(hufftable)
+            generateHuffmanCodes(hufftable)
             i += 1
 
     #done
@@ -792,14 +792,14 @@ class JPG:
         Reads the bitstream of JPG image.
         """
 
-        # initialises a scan array.
-        # current byte at index i is appended to scan
+        # initialises a bytestream array.
+        # current byte at index i is appended to bytestream
         # if current byte and current byte + 1 are FF00, increments index.
         # FF is used to indicate new marker segment, FF00 is byte stuffing to stop encoder from assuming it is new segment.
-        scan = []
+        bytestream = []
         i = self.header.bitstreamIndex        
         while i < len(data):
-            scan.append(data[i])
+            bytestream.append(data[i])
             if data[i] == 0xFF:
                 if data[i+1] == 0x00:
                     i+=1
@@ -828,7 +828,7 @@ class JPG:
         # decodes each MCU by iterating totalMCU times.
         # appends each decoded MCU to MCUVector
         finalDcCoeff: int = 0
-        bits = BitReader(scan)
+        bits = BitReader(bytestream)
         for i in range(totalMCU):
             mcu = MinimumCodedUnit()
             if len(self.MCUVector) == 0:
@@ -1202,12 +1202,23 @@ def printMCU(mcu: MinimumCodedUnit) -> None:
     for chrominance in mcu.chrominance:
         printBlock(chrominance)
 
-def getHuffmanCodes(huffmanTable: HuffmanTable) -> None:
-    code = 0
+def generateHuffmanCodes(huffmanTable: HuffmanTable) -> None:
+    """
+    Reads from the huffman table's offsets array to update its codes array
+    """
+    # initially code is 1 bit long so, 0 to begin with.
+    code = 0 
     for offset in range(16):
+        # for all code lengths from 1 - 16 where offset is current code length - 1 since offset is going from 0-15
+        # when considering the current code length (offset + 1), we need to loop for total number of codes that are that length
+        # huffmanTable.offsets[offset] gives starting index into the codes array of codes that are offset + 1 long
         for i in range(huffmanTable.offsets[offset], huffmanTable.offsets[offset + 1]):
+            # takes the current code candidate and finalise it as a real code.
             huffmanTable.codes[i] = code
+            # add 1 to the code candidate for the next code to be read.
             code += 1
+        # everytime we move down the list (codes of len 1, codes of len 2, 3) etc, we have to increase the code length by appending a 0 to the right
+        # this is done by binary shifting to the left by 1.
         code = code << 1
 
 def getMinBinaryLength(number: int) -> int:
@@ -1325,7 +1336,7 @@ def createHuffmanTable(huffman_table: HuffmanTable, type: str, component: str) -
             for i in range(17):
                 huffman_table.offsets[i] = acChrominanceOffsets[i]
 
-    getHuffmanCodes(huffman_table) 
+    generateHuffmanCodes(huffman_table) 
 
 def removeNameFromFileData(filedata: bytearray) -> str:
 
