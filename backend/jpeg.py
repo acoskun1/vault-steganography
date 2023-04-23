@@ -42,18 +42,22 @@ unsupportedMarkers = {
     0xDF: 'Expand Reference Component'
 }
 
+# opens the image file and reads it in chunks. 
 def loadJPEG(filename: str) -> bytearray:
     try:
-        with open(filename, 'rb+') as f:
+        with open(filename, 'rb+') as f: # read and write binary mode.
             header = f.read(2)
             if len(header) < 2:
-                raise RuntimeError(f' {os.path.basename(filename)} is empty and file is not a valid JPEG file.')
+                raise RuntimeError(f' {os.path.basename(filename)} is empty.')
             else:
+                # combines the first 2 bytes to get 16-bit integer value the first marker segment in file. If FFD8, file is a jpeg image. 
                 marker = (header[0] << 8) + header[1]
-                unsigned_marker = (header[0] & 0xFF) * 256 + (header[1] & 0xFF)
-                if marker != 0xFFD8 and marker not in supportedMarkers:
+                if marker != 0xFFD8:
                     raise RuntimeError(f' {os.path.basename(filename)} file is not a valid JPEG file.')
+                
                 filedata = [header[0], header[1]]
+                
+                # read file in chunks, loop continues until no more data to read from file.
                 while True:
                     chunk_header = f.read(2)
                     if not chunk_header:
@@ -86,7 +90,7 @@ class StartOfFrame:
         self.numOfComponents = 0x00
         self.set = False
 
-#Component Class (Y'CbCr or Grayscale)
+#Component Class (Y'CbCr)
 class Component:
     def __init__(self) -> None:
         self.identifier: int = 0
@@ -777,14 +781,21 @@ class JPG:
         self.Bits = 0
         data = loadJPEG(file)
         self.header.readHeader(data)
-        self.readBitstream(data)
+        self.decodeBitstream(data)
 
     def __str__(self) -> str:
         return str(self.header)
     
     #done
-    def readBitstream(self, data: bytearray) -> None:
+    def decodeBitstream(self, data: bytearray) -> None:
+        """
+        Reads the bitstream of JPG image.
+        """
 
+        # initialises a scan array.
+        # current byte at index i is appended to scan
+        # if current byte and current byte + 1 are FF00, increments index.
+        # FF is used to indicate new marker segment, FF00 is byte stuffing to stop encoder from assuming it is new segment.
         scan = []
         i = self.header.bitstreamIndex        
         while i < len(data):
@@ -793,32 +804,42 @@ class JPG:
                 if data[i+1] == 0x00:
                     i+=1
             i+=1
-            
+        
+        # adds 7 to the width & height and divides by 8 to round up width & height to the nearest multiple of 8 pixels.
+        # done because JPEG compression works on 8x8 Minimum Coded Units (MCU).
         bWidth = ((self.header.startOfFrame.width + 7) // 8)
         bHeight = ((self.header.startOfFrame.height + 7) // 8)
 
+        # checks if block width & height are odd
+        # checks if luminance component horizontal and vertical sampling factors are 2
+        # if odd and 2, last column or row of blocks will not be complete. 
         if bWidth % 2 == 1 and self.header.components[0].horizontalSamplingFactor == 2:
+            # adds extra block to width to ensure last row of blocks is complete
             bWidth += 1
         
         if bHeight % 2 == 1 and self.header.components[0].verticalSamplingFactor == 2:
+            # adds extra block to height to ensure last row of blocks is complete
             bHeight += 1
 
-        blocks = bHeight * bWidth
-        noOfMCU = blocks // (self.header.components[0].verticalSamplingFactor * self.header.components[0].horizontalSamplingFactor)
-        # print(noOfMCU)
+        totalBlocks = bHeight * bWidth
+        totalMCU = totalBlocks // (self.header.components[0].verticalSamplingFactor * self.header.components[0].horizontalSamplingFactor)
+        # print(totalMCU)
+
+        # decodes each MCU by iterating totalMCU times.
+        # appends each decoded MCU to MCUVector
         finalDcCoeff: int = 0
         bits = BitReader(scan)
-        for i in range(noOfMCU):
+        for i in range(totalMCU):
             mcu = MinimumCodedUnit()
             if len(self.MCUVector) == 0:
                 finalDcCoeff = 0
             else:
                 finalDcCoeff = self.MCUVector[-1].chrominance[1].dcCoeff
-            self.readNextMCU(mcu, bits, finalDcCoeff)
+            self.decodeMCU(mcu, bits, finalDcCoeff)
             self.MCUVector.append(mcu)
 
     #done
-    def readBlock(self, channel: Channel, bit: BitReader, finalDcCoeff: int, dc: HuffmanTable, ac: HuffmanTable) -> None:
+    def decodeBlock(self, channel: Channel, bit: BitReader, finalDcCoeff: int, dc: HuffmanTable, ac: HuffmanTable) -> None:
 
         coefficient_length: int = 0
         coefficient_signed: int = 0
@@ -1028,20 +1049,27 @@ class JPG:
         return (idx, val, ch, channel, mcu)
     
     #done
-    def readNextMCU(self, mcu: MinimumCodedUnit, bit: BitReader, finalDcCoeff: int) -> None:
+    def decodeMCU(self, mcu: MinimumCodedUnit, bit: BitReader, finalDcCoeff: int) -> None:
+        """
+        Decodes Minimum Coded Unit
+        """
 
+        # total luminance blocks is the luminance horizontal sampling factor * luminance vertical sampling factor
+        # components[0] = luma, first component in YCbCr is Y - luma then Cb, Cr. 
         luminanceBlocks = self.header.components[0].horizontalSamplingFactor * self.header.components[0].verticalSamplingFactor
         for i in range(luminanceBlocks):
-            self.readBlock(mcu.luminance[i], bit, finalDcCoeff, self.header.dcHuffmanTables[self.header.components[0].dcHuffmanTableId], self.header.acHuffmanTables[self.header.components[0].acHuffmanTableId])
-            # printBlock(mcu.luminance[i])
+            # decodes each luminance block in mcu.luminance[]
+            self.decodeBlock(mcu.luminance[i], bit, finalDcCoeff, self.header.dcHuffmanTables[self.header.components[0].dcHuffmanTableId], self.header.acHuffmanTables[self.header.components[0].acHuffmanTableId])
+            # sets the DC coefficient of luma block to finalDcCoeff
             finalDcCoeff = mcu.luminance[i].dcCoeff
 
+        # if image is not grayscale, total number of colour components is more than 1.
+        # decodes each chroma block
+        # decodes only twice because in an MCU there are 4 luma and 2 chroma blocks.
         if self.header.startOfFrame.numOfComponents > 1:
-            self.readBlock(mcu.chrominance[0], bit, finalDcCoeff, self.header.dcHuffmanTables[self.header.components[1].dcHuffmanTableId], self.header.acHuffmanTables[self.header.components[1].acHuffmanTableId])
-            # printBlock(mcu.chrominance[0])
+            self.decodeBlock(mcu.chrominance[0], bit, finalDcCoeff, self.header.dcHuffmanTables[self.header.components[1].dcHuffmanTableId], self.header.acHuffmanTables[self.header.components[1].acHuffmanTableId])
             finalDcCoeff = mcu.chrominance[0].dcCoeff
-            self.readBlock(mcu.chrominance[1], bit, finalDcCoeff, self.header.dcHuffmanTables[self.header.components[2].dcHuffmanTableId], self.header.acHuffmanTables[self.header.components[2].acHuffmanTableId])
-            # printBlock(mcu.chrominance[1])
+            self.decodeBlock(mcu.chrominance[1], bit, finalDcCoeff, self.header.dcHuffmanTables[self.header.components[2].dcHuffmanTableId], self.header.acHuffmanTables[self.header.components[2].acHuffmanTableId])
 
     #done
     def extractFromJPG(self, secretData: bytearray) -> None:
@@ -1120,12 +1148,12 @@ class JPG:
 
     def inject(self, filename: str) -> None:
         #opens the secretFile in binary mode, creates an immutable bytes object
-        # file_data - immutable bytes object is converted to mutable bytearray object.
+        # file_data - immutable bytes object is converted to mutable bytearray object so that prepFileToInject() can add more bytes data.
         with open(filename, 'rb') as f:
             file_data = f.read()
             file_bytes = bytearray(file_data)
             
-        # prepFileToInject(file_bytes, filename)
+        # adds file size to the beginning of the bytearray and filename to the end.
         file_bytes = prepFileToInject(file_bytes, filename)
         if len(file_bytes) * 8 > self.Bits:
             raise RuntimeError(f'{os.path.basename(filename)} cannot be injected. Select a smaller secret file or larger JPG image.')
@@ -1182,16 +1210,6 @@ def getHuffmanCodes(huffmanTable: HuffmanTable) -> None:
             code += 1
         code = code << 1
 
-def getCodeBinary(size: int, code: int) -> str:
-    string: str = ''
-    for i in range(size):
-        if (code & 0x01 == 1):
-            string = '1' + string
-        else:
-            string = '0' + string
-        code = code >> 1
-    return string
-
 def getMinBinaryLength(number: int) -> int:
     if number == 0:
         return 0
@@ -1212,13 +1230,18 @@ def prepFileToInject(filedata: bytearray, filename: str) -> bytearray:
     for char in filename:
         filedata.append(ord(char))
 
-    datasize = len(filedata) #len(filedata) cannot be 0. 
+    datasize = len(filedata) #len(filedata) cannot be 0.
 
-    _byte = None
-    for i in range(4):
-        _byte = (datasize >> (8*i)) & 0xFF
-        filedata.insert(0, _byte)
-    return filedata
+    if datasize < 0:
+        raise ValueError(f'Secret file data size cannot be negative: {datasize}')
+    else:
+        # when datasize > 255, cannot add int value as byte - bytearray allows (0-255) only. & 0xFF masks out all the bits in the integer except the 8 least significant bits. 
+        # eg. if datasize 645, bytearray(b'\x00\x00\x02\x85\<secretMessage>/filename')
+        _byte = None
+        for i in range(4):
+            _byte = (datasize >> (8*i)) & 0xFF
+            filedata.insert(0, _byte)
+        return filedata
 
 def createHuffmanTable(huffman_table: HuffmanTable, type: str, component: str) -> None:
 
