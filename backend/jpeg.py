@@ -259,7 +259,6 @@ class Header:
        
         return json.dumps(output, indent=4)
 
-    #done
     def readHeader(self, data: bytearray) -> None:
         """
         Reads the byte in header and checks if byte is in supported/unsupported markers dictionary.
@@ -308,7 +307,6 @@ class Header:
 
             i += markerLen
             
-    #done
     def createHeaderByte(self, header: bytearray) -> None:
 
         """
@@ -332,7 +330,6 @@ class Header:
         self.writeDQT(header)
         self.writeSOS(header)
 
-    #done
     def readMarkerLength(self, data: bytearray, start: int) -> int:
 
         """
@@ -350,7 +347,6 @@ class Header:
         markerLength = markerLength | data[curr]
         return markerLength
 
-    #done
     def readSOS(self, data: bytearray, start: int, len: int) -> None:
 
         logger.info(' Reading Start of Scan (SOS)')
@@ -403,7 +399,6 @@ class Header:
             raise Exception('Error - Number of bytes do not equal the length of marker.')
         self.startOfScan.set = True          
     
-    #revisit
     def writeSOS(self, header: bytearray) -> None:
         """
         Adds StartOfScan marker to the header.   
@@ -435,7 +430,6 @@ class Header:
         header.append(0x3F)
         header.append(0x00)
 
-    #done
     def readSOF(self, data: bytearray, start: int, len: int) -> None:
         """
         Reads StartOfFrame marker in the header.
@@ -530,7 +524,6 @@ class Header:
             raise Exception('Incorrect Start of Frame length.')
         self.startOfFrame.set = True
 
-    #done
     def writeSOF(self, data: bytearray) -> None:
         
         """
@@ -566,7 +559,6 @@ class Header:
             data.append(c)
             data.append(self.components[i].quantizationTableNumber & 0xFF)
 
-    #fixed
     def readDHT(self, data: bytearray, start: int, len: int):
         """
         A single DHT segment may contain multiple Huffman Tables, each with its own information byte.
@@ -624,7 +616,6 @@ class Header:
             generateHuffmanCodes(hufftable)
             i += 1
 
-    #done
     def writeDHT(self, data: bytearray, table: int, id: int) -> None:
         
         #Add Huffman Table marker bytes (FFC4)
@@ -658,7 +649,6 @@ class Header:
         for j in range(total_codes):
             data.append(huffTable.symbols[j])
     
-    #fixed
     def readDQT(self, data: bytearray, start: int, length: int):
         """
         Reads Quantization Tables from a given file data and append it to an array named quantizationTables
@@ -689,7 +679,6 @@ class Header:
         for i in range(start, start + length):
             self.quantizationTablesData.append(data[i])
 
-    #revisit
     def writeDQT(self, header: bytearray) -> None:
         
         """
@@ -786,7 +775,6 @@ class JPG:
     def __str__(self) -> str:
         return str(self.header)
     
-    #done
     def decodeBitstream(self, data: bytearray) -> None:
         """
         Reads the bitstream of JPG image.
@@ -838,7 +826,6 @@ class JPG:
             self.decodeMCU(mcu, bits, finalDcCoeff)
             self.MCUVector.append(mcu)
 
-    #done
     def decodeBlock(self, channel: Channel, bit: BitReader, finalDcCoeff: int, dc: HuffmanTable, ac: HuffmanTable) -> None:
 
         coefficient_length: int = 0
@@ -880,7 +867,6 @@ class JPG:
                 if coefficient_signed != 0 and coefficient_signed != 1:
                     self.Bits += 1
     
-    #done
     def addBlockToBitstream(self, channel: Channel, bw: BitWriter, isChrominance: bool) -> None:
         coefficient: int = None
         zeroCount: int = 0
@@ -927,7 +913,6 @@ class JPG:
 
                 zeroCount = 0
         
-    #done
     def writeMCUtoBitstream(self, mcu: MinimumCodedUnit, bitwriter: BitWriter) -> None:
         number_of_luminance_components: int = self.header.components[0].horizontalSamplingFactor * self.header.components[0].verticalSamplingFactor
         for i in range(number_of_luminance_components):
@@ -943,7 +928,6 @@ class JPG:
         self.currChannelType = True
         self.currMCU = 0
 
-    #done
     def readNextSymbol(self, bits: BitReader, huffmanTable: HuffmanTable) -> int:
         code: int = 0
         codeIdx: int = 0
@@ -999,7 +983,6 @@ class JPG:
         
         return i
 
-    #done
     def getNextFreeCoeff(self) -> tuple:
         # tup = (index,value)
         tup = self.getNextCoeff()
@@ -1007,7 +990,6 @@ class JPG:
             tup = self.getNextCoeff() 
         return tup 
 
-    #done
     def getNextCoeff(self) -> tuple:
 
         if self.currMCU >= len(self.MCUVector):
@@ -1048,7 +1030,6 @@ class JPG:
         
         return (idx, val, ch, channel, mcu)
     
-    #done
     def decodeMCU(self, mcu: MinimumCodedUnit, bit: BitReader, finalDcCoeff: int) -> None:
         """
         Decodes Minimum Coded Unit
@@ -1071,7 +1052,6 @@ class JPG:
             finalDcCoeff = mcu.chrominance[0].dcCoeff
             self.decodeBlock(mcu.chrominance[1], bit, finalDcCoeff, self.header.dcHuffmanTables[self.header.components[2].dcHuffmanTableId], self.header.acHuffmanTables[self.header.components[2].acHuffmanTableId])
 
-    #done
     def extractFromJPG(self, secretData: bytearray) -> None:
 
         self.resetCurr()
@@ -1107,7 +1087,6 @@ class JPG:
             else:
                 break
 
-    #done
     def saveJPGData(self, name: str) -> None:
         '''
         Saves current JPEG image in memory to a file with the given name.
@@ -1139,7 +1118,6 @@ class JPG:
         _bytes.append(0xD9)
         writeToFile(name, _bytes)
 
-    #done
     def makeNewBitstream(self, bitstream: bytearray) -> None:
         bitwriter = BitWriter()
         for i in range(len(self.MCUVector)):
