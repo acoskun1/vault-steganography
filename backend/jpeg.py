@@ -867,7 +867,8 @@ class JPG:
                 if coefficient_signed != 0 and coefficient_signed != 1:
                     self.Bits += 1
     
-    def addBlockToBitstream(self, channel: Channel, bw: BitWriter, isChrominance: bool) -> None:
+    def writeBlock(self, channel: Channel, bw: BitWriter, isChrominance: bool) -> None:
+        # adds blocks to the bitstream
         coefficient: int = None
         zeroCount: int = 0
         codeWrapper = CodeWrapper()
@@ -913,16 +914,17 @@ class JPG:
 
                 zeroCount = 0
         
-    def writeMCUtoBitstream(self, mcu: MinimumCodedUnit, bitwriter: BitWriter) -> None:
+    def writeMCU(self, mcu: MinimumCodedUnit, bitwriter: BitWriter) -> None:
+        # writes Minimum Coded Unit to Bitstream
         number_of_luminance_components: int = self.header.components[0].horizontalSamplingFactor * self.header.components[0].verticalSamplingFactor
         for i in range(number_of_luminance_components):
-            self.addBlockToBitstream(mcu.luminance[i], bitwriter, False)
+            self.writeBlock(mcu.luminance[i], bitwriter, False)
         
         if self.header.startOfFrame.numOfComponents > 1:
-            self.addBlockToBitstream(mcu.chrominance[0], bitwriter, True)
-            self.addBlockToBitstream(mcu.chrominance[1], bitwriter, True)
+            self.writeBlock(mcu.chrominance[0], bitwriter, True)
+            self.writeBlock(mcu.chrominance[1], bitwriter, True)
 
-    def resetCurr(self) -> None:
+    def reset(self) -> None:
         self.Coefficient = 0
         self.currChannel = 0
         self.currChannelType = True
@@ -949,13 +951,13 @@ class JPG:
         
         return huffmanTable.symbols[codeIdx]
 
-    def getNextFreeCoeffExtract(self) -> int:
-        i = self.getNextCoeffExtract()
+    def findAvailableCoeffExtract(self) -> int:
+        i = self.findCoeffExtract()
         while i == 0 or i == 1:
-            i = self.getNextCoeffExtract()
+            i = self.findCoeffExtract()
         return i
 
-    def getNextCoeffExtract(self) -> int:
+    def findCoeffExtract(self) -> int:
         
         if self.currMCU >= len(self.MCUVector):
             raise RuntimeError("Index of coefficient read is out of range.")
@@ -983,14 +985,14 @@ class JPG:
         
         return i
 
-    def getNextFreeCoeff(self) -> tuple:
+    def findAvailableCoeff(self) -> tuple:
         # tup = (index,value)
-        tup = self.getNextCoeff()
+        tup = self.findCoeff()
         while tup[1] == 0 or tup[1] == 1:
-            tup = self.getNextCoeff() 
+            tup = self.findCoeff() 
         return tup 
 
-    def getNextCoeff(self) -> tuple:
+    def findCoeff(self) -> tuple:
 
         if self.currMCU >= len(self.MCUVector):
             raise RuntimeError("Index of coefficient read is out of range.")
@@ -1054,13 +1056,13 @@ class JPG:
 
     def extractFromJPG(self, secretData: bytearray) -> None:
 
-        self.resetCurr()
+        self.reset()
         size_of_secret_file: int = 0
         coefficient_value = 0
         _byte = np.array(0x00).astype(dtype=np.uint32)
 
         for i in range(32):
-            coefficient_value = self.getNextFreeCoeffExtract()
+            coefficient_value = self.findAvailableCoeffExtract()
             if coefficient_value is not None:
                 coefficient_value_unsigned = np.array(coefficient_value).astype(dtype=np.uint32)
                 
@@ -1073,7 +1075,7 @@ class JPG:
                 break
             
         for i in range(1, ((size_of_secret_file * 8) + 1)):
-            coefficient_value = self.getNextFreeCoeffExtract()
+            coefficient_value = self.findAvailableCoeffExtract()
             if coefficient_value is not None:
                 coefficient_value_unsigned = np.array(coefficient_value).astype(dtype=np.uint32)
             
@@ -1121,7 +1123,7 @@ class JPG:
     def makeNewBitstream(self, bitstream: bytearray) -> None:
         bitwriter = BitWriter()
         for i in range(len(self.MCUVector)):
-            self.writeMCUtoBitstream(self.MCUVector[i], bitwriter)
+            self.writeMCU(self.MCUVector[i], bitwriter)
         bitwriter.copy(bitstream)
 
     def inject(self, filename: str) -> None:
@@ -1139,7 +1141,7 @@ class JPG:
         #creates a bitreader object from the secretFile bytes.
         bitreader = BitReader(file_bytes)
         for i in range(len(file_bytes) * 8):
-            tup = self.getNextFreeCoeff()
+            tup = self.findAvailableCoeff()
             
             coefficient_index = tup[0]
             coefficient_value = tup[1]
