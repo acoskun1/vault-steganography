@@ -50,18 +50,22 @@ You can also run python3 vault.py --help to see all.
 ## How to run the program?
 When running the program, you must be located inside the backend directory or calling vault.py from the location it is in.
 
-Embed:<br>
+### Embed:<br>
 if inside /stegvalet/backend/
-+ python3 vault.py --embed path/to/cover/image  path/to/secret/file/  path/to/stego/image/written
+    
+    python3 vault.py --embed path/to/cover/image  path/to/secret/file/  path/to/stego/image/written
 
 if outside of backend:
-+ python3 path/to/stegvalet/vault.py --embed path/to/cover/image  path/to/secret/file/  path/to/stego/image/written
 
-Retrieve:<br>
+    python3 path/to/stegvalet/vault.py --embed path/to/cover/image  path/to/secret/file/  path/to/stego/image/written
+
+### Retrieve:<br>
 if inside /stegvalet/backend/
-+ python3 vault.py --retrieve path/to/stego/image/
+
+    python3 vault.py --retrieve path/to/stego/image/
 
 if outside of backend:
-+ python3 path/to/stegvalet/vault.py --retrieve path/to/stego/image/
+    
+    python3 path/to/stegvalet/vault.py --retrieve path/to/stego/image/
 ***
 
