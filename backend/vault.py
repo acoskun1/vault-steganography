@@ -86,7 +86,7 @@ if __name__ == "__main__":
                     logger.info(f' Image metadata:\n{str(_stego_image)}\n')              
                 
                 # retrieving the secret message happens here
-                _stego_image.recoverHiddenFile()
+                _stego_image.retrieveHiddenFile()
                 logger.info(f' Secret file is saved to current working directory. Type ls to see file.')
 
 
@@ -137,7 +137,7 @@ if __name__ == "__main__":
                     logger.info(f' Image metadata:\n{str(_cover_image)}\n')
                 
                 # hiding secret file to cover image begins here. 
-                _cover_image.inject(args.secret_file)
+                _cover_image.injectFile(args.secret_file)
                 # saves the new jpeg data (post injection) to at stego image.
                 _cover_image.saveJPGData(args.stego_image)
                 logger.info(f' Stego image is saved to {args.stego_image}')

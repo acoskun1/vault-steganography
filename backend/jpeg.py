@@ -1115,18 +1115,18 @@ class JPG:
         _bytes = bytearray()
         self.header.fillHeaderBytes(_bytes)
         
-        self.makeNewBitstream(_bytes)
+        self.makeBitstream(_bytes)
         _bytes.append(0xFF) 
         _bytes.append(0xD9)
         writeToFile(name, _bytes)
 
-    def makeNewBitstream(self, bitstream: bytearray) -> None:
+    def makeBitstream(self, bitstream: bytearray) -> None:
         bitwriter = BitWriter()
         for i in range(len(self.MCUVector)):
             self.writeMCU(self.MCUVector[i], bitwriter)
         bitwriter.copy(bitstream)
 
-    def inject(self, filename: str) -> None:
+    def injectFile(self, filename: str) -> None:
         #opens the secretFile in binary mode, creates an immutable bytes object
         # file_data - immutable bytes object is converted to mutable bytearray object so that prepFileToInject() can add more bytes data.
         with open(filename, 'rb') as f:
@@ -1162,7 +1162,7 @@ class JPG:
             else:
                 self.MCUVector[mcu].chrominance[channel].acCoeff[coefficient_index] = coefficient_value_signed
 
-    def recoverHiddenFile(self) -> None:
+    def retrieveHiddenFile(self) -> None:
         secretData: bytearray = []
         self.extractFromJPG(secretData)
         filename = removeNameFromFileData(secretData)
