@@ -12,6 +12,19 @@
 + reader.py: implements reading bits from binary data
 + writer.py: implements writing bits from binary data
 ***
+## Requirements
+Vault was written using Python 3.10.6, if you are using Python2 or 3.8 it will not work. 
+
+Dependencies used:
++ NumPy 
++ python-dateutil
+
+To install the dependencies, go to backend/ and type:<br>
+
+    pip3 install -r requirements.txt
+
+Note: If you do not install from requirements.txt and use Python 3.10.6 as default, vault will not work.
+***
 ## How Vault works:
 While embedding you must specify three parameters "path_to_cover_image", "path_to_secret_text", "path_to_where_stego_image_written".
 
