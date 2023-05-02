@@ -151,7 +151,7 @@ class Header:
         self.quantizationTables: List[QuantizationTable] = []
         self.quantizationTablesData: List[int] = []
         self.app0Marker: bytearray = []
-        self.zeroBased: bool = False
+        self.zeroBased: bool = False # if False, colour IDs (1,2,3) - if True, colour ID is 0.
         self.startOfSelection: int = 0
         self.endOfSeleciton: int = 0
         self.successiveApproxHigh: int = 0
@@ -337,15 +337,15 @@ class Header:
         Does it by using bitwise OR operation twice (each for a byte).
         """
 
-        markerLength = 0
+        length = 0
         curr = start
 
-        markerLength = markerLength | data[curr]
+        length = length | data[curr]
         curr += 1
 
-        markerLength = markerLength << 8
-        markerLength = markerLength | data[curr]
-        return markerLength
+        length = length << 8
+        length = length | data[curr]
+        return length
 
     def readSOS(self, data: bytearray, start: int, len: int) -> None:
 
@@ -377,6 +377,7 @@ class Header:
             else:
                 component.dcHuffmanTableId = dcId
 
+        # the following are for progressive JPEGs, they are not that important, however a positive to include. 
         i += 1
         startOfSelection = data[i]
         i += 1
@@ -456,7 +457,7 @@ class Header:
         i += 1    
         self.startOfFrame.height = self.startOfFrame.height + data[i]
         
-        #checks if image width is 0. Image heigth cannot be 0 px.
+        #checks if image height is 0. Image height cannot be 0 px.
         if self.startOfFrame.height == 0:
             raise Exception('Error - Image height is 0 px.')
 
@@ -491,8 +492,10 @@ class Header:
             i += 1
             comp.identifier = data[i]
 
+            #if colour component ID is 0, sets the zeroBased flag in Header to True.
             if comp.identifier == 0:
                 self.zeroBased = True
+            #this ensures that all components IDs are adjusted to 1,2,3 from 0,1,2
             if self.zeroBased:
                 comp.identifier += 1
 
@@ -502,6 +505,7 @@ class Header:
             i += 1
             comp.quantizationTableNumber = data[i]
             
+            #to check component identifiers are supported. If component ID is not 1 or 2 or 3, image is other than YCbCr.
             if comp.identifier == 4 or comp.identifier == 5:
                 raise Exception(f'Error - YIQ colour mode is not supported. ComponentID: {comp.identifier}')
             if comp.identifier == 0 or comp.identifier > 3:
@@ -510,6 +514,7 @@ class Header:
                 raise Exception(f'Error - Duplicate colour component ID: {comp.identifier}')
             seen_ids.append(comp.identifier)
 
+        #checks if horizontal and vertical sampling factors of colour components are supported by JPEG. 
         if self.startOfFrame.numOfComponents > 1:
             if ((self.components[0].verticalSamplingFactor != 1 and self.components[0].verticalSamplingFactor != 2)
             or (self.components[0].horizontalSamplingFactor != 1 and self.components[0].horizontalSamplingFactor != 2)
@@ -599,17 +604,21 @@ class Header:
             if hufftable.set:
                 raise ValueError('Error - Huffman table was assigned multiple times.')
 
-            totalCodes = 0
+            allCodes = 0
+            # reading 16 bytes which represent codes of each length from 1 - 16 bits long.
             for j in range(1,17):
                 i += 1
-                totalCodes += data[i]
-                hufftable.offsets[j] = totalCodes
+                # keeps total symbols by reading the next byte
+                allCodes += data[i]
+                # use the current value of total symbols to set the next value in offsets array.
+                hufftable.offsets[j] = allCodes
 
-            for j in range(totalCodes):
+            # reading next chunk of bytes which are all the symbols and store them in a straight line in the symbols array.
+            for j in range(allCodes):
                 i += 1
                 hufftable.symbols[j] = data[i]
 
-            hufftable.numberOfCodes = totalCodes
+            hufftable.numberOfCodes = allCodes
             hufftable.table_length = len
             hufftable.destination_id = tableId
             hufftable.set = True
@@ -718,7 +727,8 @@ class Header:
         i += 1
         self.restartInterval = self.restartInterval | data[i]
 
-    def convertSymbolToCode(self, symbol: int, isAC: bool, isChrominance: bool, wrapper: CodeWrapper) -> None:
+    def generateSymbolCode(self, symbol: int, isAC: bool, isChrominance: bool, wrapper: CodeWrapper) -> None:
+        # used during encoding, converts the symbols to a code
         huffman_table = None
         if isAC:
             huffman_table = self.acHuffmanTables[isChrominance]
@@ -795,8 +805,8 @@ class JPG:
         
         # adds 7 to the width & height and divides by 8 to round up width & height to the nearest multiple of 8 pixels.
         # done because JPEG compression works on 8x8 Minimum Coded Units (MCU).
-        bWidth = ((self.header.startOfFrame.width + 7) // 8)
-        bHeight = ((self.header.startOfFrame.height + 7) // 8)
+        bWidth = (self.header.startOfFrame.width + 7) // 8
+        bHeight = (self.header.startOfFrame.height + 7) // 8
 
         # checks if block width & height are odd
         # checks if luminance component horizontal and vertical sampling factors are 2
@@ -868,7 +878,7 @@ class JPG:
                     self.Bits += 1
     
     def writeBlock(self, channel: Channel, bw: BitWriter, isChrominance: bool) -> None:
-        # adds blocks to the bitstream
+  
         coefficient: int = None
         zeroCount: int = 0
         codeWrapper = CodeWrapper()
@@ -878,7 +888,7 @@ class JPG:
         coefficient = channel.dcCoeff
         coefficientLength = getMinBinaryLength(coefficient)
         symbol = 0x00 | coefficientLength
-        self.header.convertSymbolToCode(symbol, False, isChrominance, codeWrapper)
+        self.header.generateSymbolCode(symbol, False, isChrominance, codeWrapper)
         bw.write_int(codeWrapper.code, codeWrapper.length)
 
         if coefficient < 0:
@@ -889,14 +899,14 @@ class JPG:
             coefficient = channel.acCoeff[j]
 
             if j == 62 and coefficient == 0:
-                self.header.convertSymbolToCode(0x00, True, isChrominance, codeWrapper)
+                self.header.generateSymbolCode(0x00, True, isChrominance, codeWrapper)
                 bw.write_int(codeWrapper.code, codeWrapper.length)
                 break
             elif coefficient == 0:
                 zeroCount += 1
             else:
                 while zeroCount >= 16:
-                    self.header.convertSymbolToCode(0xF0, True, isChrominance, codeWrapper)
+                    self.header.generateSymbolCode(0xF0, True, isChrominance, codeWrapper)
                     bw.write_int(codeWrapper.code, codeWrapper.length)
                     zeroCount -= 16
 
@@ -905,7 +915,7 @@ class JPG:
                 symbol = 0x00 | zeroCount
                 symbol = symbol << 4
                 symbol = symbol | coefficientLength
-                self.header.convertSymbolToCode(symbol, True, isChrominance, codeWrapper)
+                self.header.generateSymbolCode(symbol, True, isChrominance, codeWrapper)
                 bw.write_int(codeWrapper.code, codeWrapper.length)
 
                 if coefficient < 0:
@@ -1036,7 +1046,6 @@ class JPG:
         """
         Decodes Minimum Coded Unit
         """
-
         # total luminance blocks is the luminance horizontal sampling factor * luminance vertical sampling factor
         # components[0] = luma, first component in YCbCr is Y - luma then Cb, Cr. 
         luminanceBlocks = self.header.components[0].horizontalSamplingFactor * self.header.components[0].verticalSamplingFactor
@@ -1119,6 +1128,7 @@ class JPG:
         _bytes.append(0xFF) 
         _bytes.append(0xD9)
         writeToFile(name, _bytes)
+        #END of encoding.
 
     def makeBitstream(self, bitstream: bytearray) -> None:
         bitwriter = BitWriter()
@@ -1136,7 +1146,7 @@ class JPG:
         # adds file size to the beginning of the bytearray and filename to the end.
         file_bytes = prepFileToInject(file_bytes, filename)
         if len(file_bytes) * 8 > self.Bits:
-            raise RuntimeError(f'{os.path.basename(filename)} cannot be injected. Select a smaller secret file or larger JPG image.')
+            raise RuntimeError(f'{os.path.basename(filename)} cannot be injected.')
         
         #creates a bitreader object from the secretFile bytes.
         bitreader = BitReader(file_bytes)
@@ -1163,10 +1173,10 @@ class JPG:
                 self.MCUVector[mcu].chrominance[channel].acCoeff[coefficient_index] = coefficient_value_signed
 
     def retrieveHiddenFile(self) -> None:
-        secretData: bytearray = []
-        self.extractFromJPG(secretData)
-        filename = removeNameFromFileData(secretData)
-        writeToFile(filename, bytes(secretData))
+        data: bytearray = []
+        self.extractFromJPG(data)
+        filename = removeNameFromFileData(data)
+        writeToFile(filename, bytes(data))
 
 # used for debugging. No effect on both embed and retrieve
 def printBlock(channel: Channel) -> None:
@@ -1201,18 +1211,17 @@ def generateHuffmanCodes(huffmanTable: HuffmanTable) -> None:
         # this is done by binary shifting to the left by 1.
         code = code << 1
 
-def getMinBinaryLength(number: int) -> int:
-    if number == 0:
+def getMinBinaryLength(n: int) -> int:
+    if n == 0:
         return 0
-    if number < 0:
-        number = abs(number)
-    
-    length = 0
-    while number:
-        number = number >> 1
-        length += 1
+    if n < 0:
+        n *= - 1
+    len = 0
+    while n:
+        n = n >> 1
+        len += 1
 
-    return length
+    return len
 
 def prepFileToInject(filedata: bytearray, filename: str) -> bytearray:
     filename = os.path.basename(filename)

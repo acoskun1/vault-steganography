@@ -12,11 +12,9 @@ class BitWriter:
     + write_int(self, i, len) -> None:
         Takes integer and length, writes the length least significant bits of i to the data array.
     + copy(self, data) -> None:
-        Takes an array of integers and a boolean addPadding argument.
+        Takes an array of integers.
         Copies the contents of the data array.
-        If addPadding True, adds padding bits to the end of the data vector.
     """
-    
     def __init__(self) -> None:
         self.data_ = []
         self.nextBit_ = 0

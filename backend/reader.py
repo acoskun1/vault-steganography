@@ -19,15 +19,15 @@ class BitReader:
         self.isread = False
 
     def readNextBit(self, n = 1) -> int:
-        result = np.uint8(0)
+        res = np.uint8(0)
         byte = None
         for i in range(n):
             if self.isread:
                 break
             byte = self.data[self.byte]
             byte = byte >> (7 - self.Bit)
-            result = result << 1
-            result = result | (byte & 0x01)
+            res <<=  1
+            res = res | (byte & 0x01)
 
             self.Bit = (self.Bit + 1) % 8
             if self.Bit == 0:
@@ -35,7 +35,7 @@ class BitReader:
 
             if self.byte >= len(self.data):
                 self.isread = True
-        return result
+        return res
 
     def isRead(self) -> bool:
         return self.isread
