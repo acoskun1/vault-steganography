@@ -838,9 +838,6 @@ class JPG:
 
     def decodeBlock(self, channel: Channel, bit: BitReader, finalDcCoeff: int, dc: HuffmanTable, ac: HuffmanTable) -> None:
 
-        coefficient_length: int = 0
-        coefficient_signed: int = 0
-        coefficient_unsigned: int = 0
         symbol = self.readNextSymbol(bit, dc)
 
         if symbol == 0x00:
@@ -877,52 +874,49 @@ class JPG:
                 if coefficient_signed != 0 and coefficient_signed != 1:
                     self.Bits += 1
     
-    def writeBlock(self, channel: Channel, bw: BitWriter, isChrominance: bool) -> None:
+    def writeBlock(self, channel: Channel, bitwriter: BitWriter, isChrominance: bool) -> None:
   
-        coefficient: int = None
-        zeroCount: int = 0
+        number_of_zeros = 0
         codeWrapper = CodeWrapper()
-        coefficientLength: int = None
-        symbol: int = None
 
-        coefficient = channel.dcCoeff
-        coefficientLength = getMinBinaryLength(coefficient)
-        symbol = 0x00 | coefficientLength
+        coeff = channel.dcCoeff
+        coeff_len = getMinBinaryLength(coeff)
+        symbol = 0x00 | coeff_len
         self.header.generateSymbolCode(symbol, False, isChrominance, codeWrapper)
-        bw.write_int(codeWrapper.code, codeWrapper.length)
+        bitwriter.write_int(codeWrapper.code, codeWrapper.length)
 
-        if coefficient < 0:
-            coefficient = coefficient - 1
-        bw.write_int(coefficient, coefficientLength)
+        if coeff < 0:
+            coeff -= 1
+        bitwriter.write_int(coeff, coeff_len)
         
         for j in range(63):
-            coefficient = channel.acCoeff[j]
+            coeff = channel.acCoeff[j]
 
-            if j == 62 and coefficient == 0:
+            if j == 62 and coeff == 0:
                 self.header.generateSymbolCode(0x00, True, isChrominance, codeWrapper)
-                bw.write_int(codeWrapper.code, codeWrapper.length)
+                bitwriter.write_int(codeWrapper.code, codeWrapper.length)
                 break
-            elif coefficient == 0:
-                zeroCount += 1
+            elif coeff == 0:
+                number_of_zeros += 1
             else:
-                while zeroCount >= 16:
+                while number_of_zeros >= 16:
                     self.header.generateSymbolCode(0xF0, True, isChrominance, codeWrapper)
-                    bw.write_int(codeWrapper.code, codeWrapper.length)
-                    zeroCount -= 16
+                    bitwriter.write_int(codeWrapper.code, codeWrapper.length)
+                    number_of_zeros -= 16
 
                 
-                coefficientLength = getMinBinaryLength(coefficient)
-                symbol = 0x00 | zeroCount
-                symbol = symbol << 4
-                symbol = symbol | coefficientLength
+                coeff_len = getMinBinaryLength(coeff)
+                symbol = 0x00 | number_of_zeros
+                symbol <<= 4
+                symbol = symbol | coeff_len
                 self.header.generateSymbolCode(symbol, True, isChrominance, codeWrapper)
-                bw.write_int(codeWrapper.code, codeWrapper.length)
+                bitwriter.write_int(codeWrapper.code, codeWrapper.length)
 
-                if coefficient < 0:
-                    coefficient = coefficient - 1
-                bw.write_int(coefficient, coefficientLength)
+                if coeff < 0:
+                    coeff -= 1
+                bitwriter.write_int(coeff, coeff_len)
 
-                zeroCount = 0
+                number_of_zeros = 0
         
     def writeMCU(self, mcu: MinimumCodedUnit, bitwriter: BitWriter) -> None:
         # writes Minimum Coded Unit to Bitstream
@@ -1244,6 +1238,16 @@ def prepFileToInject(filedata: bytearray, filename: str) -> bytearray:
         return filedata
 
 def createHuffmanTable(huffman_table: HuffmanTable, type: str, component: str) -> None:
+
+    """
+    The hardcoded data you see in this function is a standard. It does not differ.
+    This must be the same because Huffman Table optimization must be done after the coefficients are altered.
+    Steganography makes the frequency distribution of Huffman symbols change, therefore original Huffman Table
+    data cannot be used to encode the altered coefficients.
+
+    For this reason new Huffman Tables must be created. This function does it so.
+    Values you see in the tables below are according to the JPEG standard.
+    """
 
     if type != 'dc' and type != 'ac':
         raise RuntimeError("Huffman table type is not 'ac' or 'dc'.")
