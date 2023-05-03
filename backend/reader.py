@@ -10,7 +10,6 @@ class BitReader:
         If n > number of remaining bits, return remaining bits.
         If no remaining bits, return 0. 
     + isRead(self): sets self.read to true if bits in data is read.
-    + skipByte(self): skips rest of the bits and starts readNextBit from the most significant bit of the following byte.
     """
     def __init__(self, data: List[np.uint8], beginning_byte = np.uint8(0)) -> None:
         self.data = data
@@ -39,8 +38,3 @@ class BitReader:
 
     def isRead(self) -> bool:
         return self.isread
-
-    def skipByte(self) -> None:
-        if self.byte != len(self.data) - 1:
-            self.byte += 1
-            self.Bit = 0
