@@ -1,40 +1,31 @@
-from typing import List
 import numpy as np
 
 class BitReader:
 
     """
-    Reads each bit from the binary data.
-
-    + readNextBit(self, n=1): reads the next n bits from the secret data and returns the result. If n is not specified, taken as 1 by default.
-        If n > number of remaining bits, return remaining bits.
-        If no remaining bits, return 0. 
-    + isRead(self): sets self.read to true if bits in data is read.
+    Reads individual bits from byte array. Huffman coded bitstream arrives as a large byte array.
+    Huffman coded bitstream compresses the variable length codes, therefore it must be read one bit at a time. 
+    We cannot read in fixed size.
+    
+    + readNextBit(self, n=1): reads the next n bits from the byte array. If n is not specified, taken as 1 by default. 
     """
-    def __init__(self, data: List[np.uint8], beginning_byte = np.uint8(0)) -> None:
+    def __init__(self, data: bytearray, beginning_byte = np.uint8(0)) -> None:
         self.data = data
         self.byte = np.uint8(beginning_byte)
-        self.Bit = 0
-        self.isread = False
+        self.bit = 0 # the bit read at a time
 
     def readNextBit(self, n = 1) -> int:
-        res = np.uint8(0)
-        byte = None
+        nbits = np.uint8(0)
         for i in range(n):
-            if self.isread:
-                break
             byte = self.data[self.byte]
-            byte = byte >> (7 - self.Bit)
-            res <<=  1
-            res = res | (byte & 0x01)
-
-            self.Bit = (self.Bit + 1) % 8
-            if self.Bit == 0:
+            lsb_position = 7 - self.bit # used to select the appropriate bit from byte.
+            byte >>= lsb_position # shifts to the right to get the LSB of the byte. amount shifted is determined by the bit being read at the time.
+            nbits <<=  1 # shifts to the left creating space for next bit to be added.
+            nbits |=  (byte & 0x01) # sets the LSB of the nbits to extracted bit.
+            self.bit = (self.bit + 1) % 8 # when 8 bits is read, wraps bit to 0 again.
+            
+            # checks if all 8 bits in the byte have been read
+            # increments byte to move to next byte in the bitstream.
+            if self.bit == 0:
                 self.byte += 1
-
-            if self.byte >= len(self.data):
-                self.isread = True
-        return res
-
-    def isRead(self) -> bool:
-        return self.isread
+        return nbits

@@ -33,7 +33,8 @@ Vault. v1.0 Apr 2023 By Ali Coskun
 
 # returns the last time executed.
 def get_epilog() -> str:
-    _exec_at = datetime.now(tz=tz.UTC)
+    _local_tz = tz.tzlocal()
+    _exec_at = datetime.now(tz=tz.UTC).astimezone(_local_tz)
     _epilog_string = f' Last executed at: {_exec_at:%m/%d/%Y - %H:%M:%S, %Z%z}'
     return _epilog_string
 
@@ -73,7 +74,7 @@ if __name__ == "__main__":
         elif not os.path.isfile(args.stego_image):
                 parser.error(f'Stego image file cannot be located at:\n\n    {args.stego_image}\n\nPlease specify a valid path or stego image.')
         else:
-            print(f"Recovering file from image {args.stego_image}.")
+            print(f"\nRecovering file from image {args.stego_image}.\n")
             # checks if stego image is JPEG and loads file data.
             filedata = loadJPEG(args.stego_image)
             if filedata == None:

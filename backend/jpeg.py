@@ -9,7 +9,8 @@ import numpy as np
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('vault-logger')
 
-#Markers that are supported for JPEG/JFIF
+# Markers that are supported for JPEG/JFIF
+# These markers are set by Joint Photographics Expert Group, they do not differ, so if it highlights for plaigarism ignore. You can refer to the JPEG standard specification.
 supportedMarkers = {
     0xD8: 'Start of Image (SOI)',
     0xE0: 'JFIF segment marker (APP0)',
@@ -21,7 +22,8 @@ supportedMarkers = {
     0xDD: 'Define Restart Interval (DRI)'
 }
 
-#Markers that are not supported for JPEG/JFIF
+# Markers that are not supported for JPEG/JFIF
+# These markers are set by Joint Photographics Expert Group, they do not differ, so if it highlights for plaigarism ignore. You can refer to the JPEG standard specification.
 unsupportedMarkers = {
     0xC1: 'Extended Sequential DCT',
     0xC2: 'Progressive DCT',
@@ -728,20 +730,28 @@ class Header:
         self.restartInterval = self.restartInterval | data[i]
 
     def generateSymbolCode(self, symbol: int, isAC: bool, isChrominance: bool, wrapper: CodeWrapper) -> None:
-        # used during encoding, converts the symbols to a code
-        huffman_table = None
+        """
+        used during encoding, converts the symbols to a code before it is written to the bitstream.
+        function takes a symbol, and two boolean parameters to indicate if the symbol is AC/DC symbol, chrominance/luminance symbol.
+        takes a code wrapper object that holds the code itself, and the length in bits.
+        """
+        # checks if the symbol is used to represent the AC coefficient or DC coefficient.
         if isAC:
             huffman_table = self.acHuffmanTables[isChrominance]
         else:
             huffman_table = self.dcHuffmanTables[isChrominance]
 
+        # using similar technique to generateHuffmanCodes(), we access the offset array to get the starting index of coefficients of each length inside the symbols array of HuffmanTable.
         for offset in range(16):
-            for codeIndex in range(huffman_table.offsets[offset], huffman_table.offsets[offset + 1]):
-                if huffman_table.symbols[codeIndex] == symbol:
-                    wrapper.code = huffman_table.codes[codeIndex]
-                    wrapper.length = offset + 1
+            # offset stores the first index at which symbols of specific bit length start in the symbols array
+            # for however many codes of a specific length in the symbols array we compare the symbols until a match is found.
+            for idx in range(huffman_table.offsets[offset], huffman_table.offsets[offset + 1]):
+                if huffman_table.symbols[idx] == symbol:
+                    wrapper.code = huffman_table.codes[idx] # after match found, code is set to corresponding code in the codes array of HuffmanTable
+                    wrapper.length = offset + 1 # offset array starts with an extra 0, which is to represent there are 0 symbols of 1 bit length, to avoid falling behind we add + 1
                     return
         
+        # if code is not found, raise error. 02X formatting allows us to see the symbol in hex.
         message = f"Code for {symbol:02X} cannot be found in Huffman table."
         raise RuntimeError(message)
 
@@ -774,8 +784,8 @@ class JPG:
         self.header = Header()
         self.MCUVector: List[MinimumCodedUnit] = []
         self.currMCU = 0
-        self.currChannel = 0
-        self.currChannelType = True
+        self.ChannelNumber = 0
+        self.ChannelType = True
         self.Coefficient = 0
         self.Bits = 0
         data = loadJPEG(file)
@@ -825,6 +835,7 @@ class JPG:
 
         # decodes each MCU by iterating totalMCU times.
         # appends each decoded MCU to MCUVector
+        # The DC coefficient of each MCU is relative to the previous one, therefore a track of it is kept with finalDcCoeff.
         finalDcCoeff: int = 0
         bits = BitReader(bytestream)
         for i in range(totalMCU):
@@ -838,159 +849,216 @@ class JPG:
 
     def decodeBlock(self, channel: Channel, bit: BitReader, finalDcCoeff: int, dc: HuffmanTable, ac: HuffmanTable) -> None:
 
+        """USED TO HUFFMAN DECODE THE BITSTREAM"""
+
         symbol = self.readNextSymbol(bit, dc)
 
+        # [START] for DC coefficients in the 8x8 block.
         if symbol == 0x00:
             channel.dcCoeff = 0
         else:
+            # lower 4 bits of the symbol byte is the coefficient length. & 0x0F is used for getting the lower 4 bits of a byte.
             coefficient_length = symbol & 0x0F 
             coefficient_unsigned = bit.readNextBit(coefficient_length)
+            # this is the bit that checks if the full bit length is used to represent a positive coefficient or negative coefficient. 
+            # referring to the dissertation, the coefficients that have 0 in their top most significant bit can be repurposed to represent negative coefficients of same length of bits.
+            # repurpose a coefficient if unsigned coefficient is less than the mirroring point which is 2^length-1, converted to the negative by 2^(length)+1
+            # signed coefficients can be thought as the negative and positive "signed" coefficients. eg: -2,-1,1,2....
+            # unsigned coefficients can be thought as the positive "non-signed" coefficients. eg: 1,2,3,4,5....
             if coefficient_unsigned < pow(2, coefficient_length - 1):
                 coefficient_signed = coefficient_unsigned - pow(2, coefficient_length) + 1
             else:
-                coefficient_signed = int(coefficient_unsigned)
+                coefficient_signed = coefficient_unsigned
             channel.dcCoeff = coefficient_signed
+            # [END] for DC coefficients.
         
+        # [START] for AC coefficients in the 8x8 block
+        # maximum 63 AC coefficients can be read for an 8x8 block, starting coefficient is the DC coefficient - processed separately.
         coefficient_read: int = 0
         while coefficient_read < 63:
             symbol = self.readNextSymbol(bit, ac)
+            # refer to dissertation - 0x00 is a special symbol to indicate the END OF BLOCK - meaning rest of the coefficients in the 8x8 block are all 0s. 
+            # there are no non-zero coefficients in the block from this point onwards so escape the function.
             if symbol == 0x00:
                 break
+            # refer to dissertation - 0xF0 is a special symbol to indicate the run length (number of 0s preceding the coefficient) is 16. Only 16 zeros can be processed at a time.
+            # if 0xF0 is encountered, increment coefficient read by 16, because there are 16 zero coefficients between the two non-zero coefficients.
             elif symbol == 0xF0:
                 coefficient_read += 16
                 continue
+            # If symbol is not special symbols, find coefficient length by getting the lower 4 bits of the byte - & 0x0F
+            # the run length (zeros preceding the coefficient) is the upper 4 bits of a byte - >> 4
             else:
                 coefficient_length = symbol & 0x0F
-                zeros = (symbol >> 4) & 0x0F
-                coefficient_read += zeros
+                runlength = (symbol >> 4) & 0x0F
+                # increment the coefficients read by the amount of zeros in the symbol. 
+                coefficient_read += runlength
+                # read coefficient_length amount of bits to get the actual coefficient value
                 coefficient_unsigned = bit.readNextBit(coefficient_length)
+                # check if coefficient is repurposed to represent a negative coefficient, if so convert it to signed by applying 2^(length)+1
                 if coefficient_unsigned < pow(2, coefficient_length - 1):
                     coefficient_signed = coefficient_unsigned - pow(2, coefficient_length) + 1
                 else:
                     coefficient_signed = coefficient_unsigned
+                # update the coefficient value in the acCoeff array with the correct value.
                 channel.acCoeff[coefficient_read] = coefficient_signed
+                # increment the coefficient read by 1 since a single coefficient is read. This is not a special symbol so no need to increment by 16 like 0xF0.
                 coefficient_read += 1
 
                 if coefficient_signed != 0 and coefficient_signed != 1:
                     self.Bits += 1
+                #[END] for AC coefficients.
     
     def writeBlock(self, channel: Channel, bitwriter: BitWriter, isChrominance: bool) -> None:
+
+        """USED TO HUFFMAN ENCODE THE BITSTREAM AS CODE - COEFFICIENT PAIRS."""
   
+        # CodeWrapper is a helper class created to represent the code and code length.
         number_of_zeros = 0
         codeWrapper = CodeWrapper()
 
-        coeff = channel.dcCoeff
-        coeff_len = getMinBinaryLength(coeff)
-        symbol = 0x00 | coeff_len
-        self.header.generateSymbolCode(symbol, False, isChrominance, codeWrapper)
-        bitwriter.write_int(codeWrapper.code, codeWrapper.length)
+        # [START] - DC Coefficients
+        coeff = channel.dcCoeff # gets the DC coefficient of the current channel.
+        coeff_len = calculateCoeffLength(coeff) # calculates the minimum bits required to represent the coefficient length. Recall, lower 4 bits of a symbol is coeff length in bits.
+        symbol = 0x00 | coeff_len # bitwise OR is used to create the symbol. Refer to dissertation, No zeros preceding a DC coefficient therefore run length is always 0 (0x00)
+        self.header.generateSymbolCode(symbol, False, isChrominance, codeWrapper) # gets the code of the symbol. Code is stored inside the codeWrapper object that's why a parameter.
+        bitwriter.write_code(codeWrapper.code, codeWrapper.length) # writes the code to the bitstream.
 
+        # if DC coefficient is negative - its sign bit is set, adjusts the coefficient value.
+        # JPEG uses modified form of twos complement representation for -ve values
+        # -ve value is one less than the absolute value of the minimum positive value
+        # eg: in 8 bit representation, max -ve value is -128 and min +ve val is +1, to represent -128
+        # coeff value should be -127 - by subtracting 1 from the coefficient value if negative.
         if coeff < 0:
             coeff -= 1
-        bitwriter.write_int(coeff, coeff_len)
-        
+        bitwriter.write_code(coeff, coeff_len) # writes DC coefficient to bitstream using coeff_len bits
+        # [END] - DC Coefficients 
+
+        # [START] - AC Coefficients
         for j in range(63):
+            # takes the first AC coefficient following the DC coefficient. 
             coeff = channel.acCoeff[j]
 
+            # if the 62th coefficient is 0, special end of block symbol (0x00) is used - refer to dissertation.
             if j == 62 and coeff == 0:
-                self.header.generateSymbolCode(0x00, True, isChrominance, codeWrapper)
-                bitwriter.write_int(codeWrapper.code, codeWrapper.length)
+                self.header.generateSymbolCode(0x00, True, isChrominance, codeWrapper) # gets the code of 0x00, that's why first parameter is hardcoded.
+                bitwriter.write_code(codeWrapper.code, codeWrapper.length) # writes the code to the bitstream in code length's bits.
+                # end of block is reached, escape the function.
                 break
+            # if AC coefficient is not 62th coeff in the block but a 0, increments number of zeros
             elif coeff == 0:
                 number_of_zeros += 1
             else:
+                # Huffman coding can only compress 16 zeros at a time - refer to dissertation.
+                # Upper 4 bits of a symbol (run length - preceding zeros) can only be 16 values
                 while number_of_zeros >= 16:
-                    self.header.generateSymbolCode(0xF0, True, isChrominance, codeWrapper)
-                    bitwriter.write_int(codeWrapper.code, codeWrapper.length)
-                    number_of_zeros -= 16
+                    # if there are 16 zeroes or more between the previous and current non-zero coefficient, process special symbol (0xF0) - that's why first parameter is hardcoded
+                    self.header.generateSymbolCode(0xF0, True, isChrominance, codeWrapper) # gets the code of F0.
+                    bitwriter.write_code(codeWrapper.code, codeWrapper.length) #  writes the code of 0xF0 symbol to the bitstream the in required length in bits.
+                    number_of_zeros -= 16 # decrement 16 because F0 symbol is processed.
 
-                
-                coeff_len = getMinBinaryLength(coeff)
-                symbol = 0x00 | number_of_zeros
-                symbol <<= 4
-                symbol = symbol | coeff_len
-                self.header.generateSymbolCode(symbol, True, isChrominance, codeWrapper)
-                bitwriter.write_int(codeWrapper.code, codeWrapper.length)
+                # gets the bit length of non-zero coefficient.
+                coeff_len = calculateCoeffLength(coeff)
+                # creates a symbol by setting the upper 4 bits to the number of zeros preceding the coefficient and the lower 4 bits to the coefficient length in bits.
+                symbol = (number_of_zeros << 4) | coeff_len
+                self.header.generateSymbolCode(symbol, True, isChrominance, codeWrapper) # gets the code of symbol 
+                bitwriter.write_code(codeWrapper.code, codeWrapper.length) # writes the code to the bitstream in length bits.
 
+                # as explained above, for negative coefficients, the twos complement rule is applied.
                 if coeff < 0:
                     coeff -= 1
-                bitwriter.write_int(coeff, coeff_len)
+                bitwriter.write_code(coeff, coeff_len)
 
                 number_of_zeros = 0
+        # [END] - AC Coefficients.
         
     def writeMCU(self, mcu: MinimumCodedUnit, bitwriter: BitWriter) -> None:
-        # writes Minimum Coded Unit to Bitstream
+        # writes Minimum Coded Unit to the bitstream
+        # calculates the number of luminance blocks and for each luminance block, encodes the block by calling writeBlock().
         number_of_luminance_components: int = self.header.components[0].horizontalSamplingFactor * self.header.components[0].verticalSamplingFactor
         for i in range(number_of_luminance_components):
             self.writeBlock(mcu.luminance[i], bitwriter, False)
         
+        # Grayscale images (black and white), only have one colour component, YCBCR has more than once, so check is implemented if there are more than one colour component.
+        # calls writeBlock on every chrominance component. There are up to 2 chrominance components (cb and cr) therefore manually calls [0] and [1]
         if self.header.startOfFrame.numOfComponents > 1:
             self.writeBlock(mcu.chrominance[0], bitwriter, True)
             self.writeBlock(mcu.chrominance[1], bitwriter, True)
 
-    def reset(self) -> None:
-        self.Coefficient = 0
-        self.currChannel = 0
-        self.currChannelType = True
-        self.currMCU = 0
-
     def readNextSymbol(self, bits: BitReader, huffmanTable: HuffmanTable) -> int:
-        code: int = 0
-        codeIdx: int = 0
-        codeFound: bool = False
-        codeLen: int = 1
+        """READS THE SYMBOLS USED TO HUFFMAN CODE/COMPRESS THE BITSTREAM"""
 
-        while(codeLen <= 16 and not codeFound):
-            code = code << 1
-            code = code | (bits.readNextBit() & 0x01)
-            start = huffmanTable.offsets[codeLen -1]
-            mask = pow(2, codeLen) - 1
-            for i in range(start, huffmanTable.offsets[codeLen]):
-                if(code & mask) == (huffmanTable.codes[i] & mask):                    
-                    codeFound = True
-                    codeIdx = i
+        # Huffman coded bitstream represents symbols as code therefore this functino reads the symbol from the codes.
+        # bits is a BitReader object that maintains the huffman coded bitstream.
+        code: int = 0
+        index: int = 0 # index of the code in the bitstream
+        valid: bool = False # set to true when the code found is a valid code.
+        length: int = 1 # code length - must be 1 minimum, it is impossible to have a code of 0 length.
+
+        # huffman coding uses codes with a maximum length of 16 bits
+        while(length <= 16 and not valid):
+            code <<= 1 # bitwise shift to the left by 1. Making room for the next bit of the huffman code
+            code |= bits.readNextBit() & 0x01 # appends least significant bit of the next huffman code to the right end of the code.
+            start = huffmanTable.offsets[length -1] # retrieves the starting index in the huffman table for codes of length.
+            mirror = pow(2, length) - 1 # gets the sequence of 'length' ones in binary form, used to compare the bits of the huffman codes.
+            # iterates for the number of codes of specific length in bits - codes of length 2, 3 bits etc...  
+            for i in range(start, huffmanTable.offsets[length]):
+                # mirror extracts the lowest "length" bits the code we are reading and the huffman code at index i in codes array.
+                # if the lengths match, index is used to access the huffman symbol at index i.
+                if(code & mirror) == (huffmanTable.codes[i] & mirror):                    
+                    valid = True
+                    index = i
                     break
-            if not codeFound:
-                codeLen += 1
+            # if the code lengths are not matching, the validity will stay False, length is incremented and reading iterates
+            if not valid:
+                length += 1
         
-        return huffmanTable.symbols[codeIdx]
+        # returns the huffman symbol in the respective huffman table by accessing index in symbols array which stores all the huffman symbols.
+        return huffmanTable.symbols[index]
 
     def findAvailableCoeffExtract(self) -> int:
-        i = self.findCoeffExtract()
-        while i == 0 or i == 1:
-            i = self.findCoeffExtract()
-        return i
+        # derivative of findAvailableCoeff(), see explanation there.
+        coeff_value = self.findCoeffExtract()
+        while coeff_value == 0 or coeff_value == 1:
+            coeff_value = self.findCoeffExtract()
+        return coeff_value
 
     def findCoeffExtract(self) -> int:
-        
+        """
+        Derivation of findCoeff() function, just returns the coefficient value. No need to return, coefficient index, channel number, channel type, and MCU.
+        We are not altering a coefficient, we are just extracting the coefficient value which will be used in retrieval to get the embedded secret message.
+        """
+        # to understand how this works, refer to findCoeff() function. No need to comment the same here.
         if self.currMCU >= len(self.MCUVector):
             raise RuntimeError("Index of coefficient read is out of range.")
         
-        if self.currChannelType:
-            i = self.MCUVector[self.currMCU].luminance[self.currChannel].acCoeff[self.Coefficient]
+        if self.ChannelType:
+            coeff_value = self.MCUVector[self.currMCU].luminance[self.ChannelNumber].acCoeff[self.Coefficient]
         else:
-            i = self.MCUVector[self.currMCU].chrominance[self.currChannel].acCoeff[self.Coefficient]
+            coeff_value = self.MCUVector[self.currMCU].chrominance[self.ChannelNumber].acCoeff[self.Coefficient]
         
-        self.Coefficient = (self.Coefficient + 1) % 63
+        self.Coefficient += 1
+        self.Coefficient %= 63 
         
         if self.Coefficient == 0:
-            if self.currChannelType:
-                mod = self.header.components[0].horizontalSamplingFactor * self.header.components[0].verticalSamplingFactor
-                self.currChannel = (self.currChannel + 1) % mod
-                if self.currChannel == 0:
-                    self.currChannelType = False
+            if self.ChannelType:
+                self.ChannelNumber = (self.ChannelNumber + 1) % (self.header.components[0].horizontalSamplingFactor * self.header.components[0].verticalSamplingFactor)
+                if self.ChannelNumber == 0:
+                    self.ChannelType = False
             else:
-                self.currChannel = (self.currChannel + 1) % 2
-                if self.currChannel == 0:
-                    self.currChannelType = True
+                self.ChannelNumber = (self.ChannelNumber + 1) % 2
+                if self.ChannelNumber == 0:
+                    self.ChannelType = True
         
-        if self.Coefficient == 0 and self.currChannelType and self.currChannel == 0:
+        if self.Coefficient == 0 and self.ChannelType and self.ChannelNumber == 0:
             self.currMCU += 1
         
-        return i
+        return coeff_value
 
     def findAvailableCoeff(self) -> tuple:
-        # tup = (index,value)
+        
+        # tuple contains the set of information that will be needed to update the coefficient value. - coefficient index in the block, value, channel type (lum/chr), current channel
+        # to avoid embeding in the zero and one coefficients (JSTEG RULE), we check if val is 0 or 1, if so continue to find a coefficient that is not 0 or 1. Return the same tuple to injectFile()
         tup = self.findCoeff()
         while tup[1] == 0 or tup[1] == 1:
             tup = self.findCoeff() 
@@ -1001,37 +1069,42 @@ class JPG:
         if self.currMCU >= len(self.MCUVector):
             raise RuntimeError("Index of coefficient read is out of range.")
 
-        if self.currChannelType:
-            val = self.MCUVector[self.currMCU].luminance[self.currChannel].acCoeff[self.Coefficient]
+        # channel type is boolean arbitrary - True = Luminance colour channel, False = Chrominance colour channel.
+        if self.ChannelType:
+            val = self.MCUVector[self.currMCU].luminance[self.ChannelNumber].acCoeff[self.Coefficient]
             idx = self.Coefficient
             ch = True
-            channel = self.currChannel
+            channel = self.ChannelNumber
             mcu = self.currMCU
 
         else:
-            val = self.MCUVector[self.currMCU].chrominance[self.currChannel].acCoeff[self.Coefficient]
+            val = self.MCUVector[self.currMCU].chrominance[self.ChannelNumber].acCoeff[self.Coefficient]
             idx = self.Coefficient
             ch = False
-            channel = self.currChannel
+            channel = self.ChannelNumber
             mcu = self.currMCU
 
+        # increments the current coefficient by 1 each time the tuple is returned. then checks if the end of the block is reached by taking the modulus of 63.
+        # we only alter AC coefficients in each block, therefore modulus 63. Since there are 63 AC coefficients in each block.
         self.Coefficient += 1
-        self.Coefficient = self.Coefficient % 63
+        self.Coefficient %= 63
 
+        # checks if the coefficient index is zero - start of the new 8x8 block
+        # if it is, updates the channel number and channel type.
+        # if the channel number is the last in the horizontal and vertical sampling factors of the luminance component, moves to next channel
         if self.Coefficient == 0:
-            if self.currChannelType:
-                mod = self.header.components[0].horizontalSamplingFactor * self.header.components[0].verticalSamplingFactor
-                self.currChannel += 1
-                self.currChannel = self.currChannel % mod
-                if self.currChannel == 0:
-                    self.currChannelType = False
+            # If channel type is True - Luminance
+            if self.ChannelType:
+                self.ChannelNumber = (self.ChannelNumber + 1) % (self.header.components[0].horizontalSamplingFactor * self.header.components[0].verticalSamplingFactor)
+                if self.ChannelNumber == 0:
+                    self.ChannelType = False
+            # Channel type is False - Chrominance
             else:
-                self.currChannel += 1
-                self.currChannel = self.currChannel % 2
-                if self.currChannel == 0:
-                    self.currChannelType = True
+                self.ChannelNumber = (self.ChannelNumber + 1) % 2
+                if self.ChannelNumber == 0:
+                    self.ChannelType = True
         
-        if self.Coefficient == 0 and self.currChannel == 0 and self.currChannelType:
+        if self.Coefficient == 0 and self.ChannelNumber == 0 and self.ChannelType:
             self.currMCU += 1
         
         return (idx, val, ch, channel, mcu)
@@ -1051,7 +1124,7 @@ class JPG:
 
         # if image is not grayscale, total number of colour components is more than 1.
         # decodes each chroma block
-        # decodes only twice because in an MCU there are 4 luma and 2 chroma blocks.
+        # decodes only twice because in an MCU there are 4 luma and 2 chroma channels.
         if self.header.startOfFrame.numOfComponents > 1:
             self.decodeBlock(mcu.chrominance[0], bit, finalDcCoeff, self.header.dcHuffmanTables[self.header.components[1].dcHuffmanTableId], self.header.acHuffmanTables[self.header.components[1].acHuffmanTableId])
             finalDcCoeff = mcu.chrominance[0].dcCoeff
@@ -1059,7 +1132,6 @@ class JPG:
 
     def extractFromJPG(self, secretData: bytearray) -> None:
 
-        self.reset()
         size_of_secret_file: int = 0
         coefficient_value = 0
         _byte = np.array(0x00).astype(dtype=np.uint32)
@@ -1072,7 +1144,6 @@ class JPG:
                 size_of_secret_file = size_of_secret_file << 1
 
                 coefficient_value_signed = np.array(coefficient_value_unsigned & 0x01).astype(dtype=np.int32)
-                # size_of_secret_file = size_of_secret_file | (coefficient_value_unsigned & 0x01)
                 size_of_secret_file = size_of_secret_file | coefficient_value_signed
             else:
                 break
@@ -1094,41 +1165,45 @@ class JPG:
 
     def saveJPGData(self, name: str) -> None:
         '''
-        Saves current JPEG image in memory to a file with the given name.
+        Saves current JPEG image in to with the given name.
         + creates huffman tables for color components. (dc coefficients and ac coefficients use separate huffman tables.)
-        + updates the dcHuffmanTables and acHuffmanTables members of the header object with four huffman tables created.
-        + creates new bitstream  and adds the end of image marker bytes (FFD9) to the end of bitstream.
+        + updates the dcHuffmanTables and acHuffmanTables of the header object with four huffman tables created.
+        + creates new bitstream and adds the end of image marker bytes (FFD9) to the end of bitstream.
         + saves the new bitstream to a file with given name.
         '''
+        # creating empty HuffmanTables that will be filled with standard data.
         dcLuminance = HuffmanTable()
         dcChrominance = HuffmanTable()
         acLuminance = HuffmanTable()
         acChrominance = HuffmanTable()
         
-        createHuffmanTable(dcLuminance, 'dc', 'lum')
-        createHuffmanTable(acLuminance, 'ac', 'lum')
-        createHuffmanTable(dcChrominance, 'dc', 'chr')
-        createHuffmanTable(acChrominance, 'ac', 'chr')
+        optimizeHuffmanTable(dcLuminance, 'dc', 'lum')
+        optimizeHuffmanTable(acLuminance, 'ac', 'lum')
+        optimizeHuffmanTable(dcChrominance, 'dc', 'chr')
+        optimizeHuffmanTable(acChrominance, 'ac', 'chr')
 
+        # by standard, luminance tables get the ID 0, chrominance tables get the ID 1.
         self.header.dcHuffmanTables[0] = dcLuminance
         self.header.dcHuffmanTables[1] = dcChrominance
         self.header.acHuffmanTables[0] = acLuminance
         self.header.acHuffmanTables[1] = acChrominance
 
+        # creating a byte array that will store the JPEG data in bytestream
         _bytes = bytearray()
-        self.header.fillHeaderBytes(_bytes)
+        self.header.fillHeaderBytes(_bytes) # writes all the header data into the byte array the same way it is read initially.
         
-        self.makeBitstream(_bytes)
+        self.makeBitstream(_bytes) # encodes image data into bitstream using Huffman Coding and write it into the bytearray.
         _bytes.append(0xFF) 
-        _bytes.append(0xD9)
-        writeToFile(name, _bytes)
+        _bytes.append(0xD9) # adds the END OF IMAGE marker FFD9.
+        writeToFile(name, _bytes) # saves the image. 
         #END of encoding.
 
     def makeBitstream(self, bitstream: bytearray) -> None:
         bitwriter = BitWriter()
-        for i in range(len(self.MCUVector)):
+        for i in range(len(self.MCUVector)): # iterates through each minimum coded unit in the MCU vector which contains image data divided into blocks
             self.writeMCU(self.MCUVector[i], bitwriter)
-        bitwriter.copy(bitstream)
+        
+        bitwriter.add(bitstream) # adds the bitstream to the bitwriter object.
 
     def injectFile(self, filename: str) -> None:
         #opens the secretFile in binary mode, creates an immutable bytes object
@@ -1142,25 +1217,29 @@ class JPG:
         if len(file_bytes) * 8 > self.Bits:
             raise RuntimeError(f'{os.path.basename(filename)} cannot be injected.')
         
-        #creates a bitreader object from the secretFile bytes.
+        #creates a bitreader object from the secret file bytes.
         bitreader = BitReader(file_bytes)
         for i in range(len(file_bytes) * 8):
             tup = self.findAvailableCoeff()
             
             coefficient_index = tup[0]
             coefficient_value = tup[1]
-            coefficient_value_unsigned = np.array(coefficient_value).astype(dtype=np.uint8)
+            coefficient_value_unsigned = np.array(coefficient_value).astype(dtype=np.uint8) # the coefficient value is turned into an array of unsigned 8 bit integers. Otherwise bitwise logic can create bit overflows - producing a large integer coefficient.
             luminance = tup[2]
             channel = tup[3]
             mcu = tup[4]
 
             bit = bitreader.readNextBit()
+            # [START] - LEAST SIGNIFICANT BIT STEGANOGRAPHY
+            # If the bit value is 1, (true - arbitrary), changes the least significant bit (LSB) of the unsigned integer to 1. ELSE bit is 0, changes the LSB of the unsigned int to 0
             if bit:
                 coefficient_value_unsigned = coefficient_value_unsigned | 0x01
             else:
-                coefficient_value_unsigned = coefficient_value_unsigned & 0xFFFFFFFE
+                coefficient_value_unsigned = coefficient_value_unsigned & ~0x01
 
+            # unsigned value is converted back to the signed value before updating the AC coefficient value in the 8x8 block.
             coefficient_value_signed = np.int8(coefficient_value_unsigned)
+            # checks in the tuple (tup) if the channel of the AC coefficient is from the Luma or Chroma channel, then replaces the correct coefficient.
             if luminance:
                 self.MCUVector[mcu].luminance[channel].acCoeff[coefficient_index] = coefficient_value_signed
             else:
@@ -1205,27 +1284,50 @@ def generateHuffmanCodes(huffmanTable: HuffmanTable) -> None:
         # this is done by binary shifting to the left by 1.
         code = code << 1
 
-def getMinBinaryLength(n: int) -> int:
-    if n == 0:
+def calculateCoeffLength(coeff: int) -> int:
+    
+    # calculates the bits needed to represent the coefficient.
+    # refer to dissertation, variable-length encoding stores the coefficient and run length as [(r,s)c]
+    # where s is the number of bits to represent the coefficient. 
+
+    len = 0 # number of bits required to represent coefficient is stored in len variable.
+    
+    # if coefficient is a zero, returns a 0    
+    if coeff == 0:
         return 0
-    if n < 0:
-        n *= - 1
-    len = 0
-    while n:
-        n = n >> 1
+    # if coefficient is negative, first converts it to positive representation by multiplying with -1.
+    # negative coefficients have different representations than positives
+    if coeff < 0:
+        coeff *= - 1
+    
+    # while coefficient is not zero, each time halving the coeff value. Halving the coefficient each time equals to shifting to the right by a bit each time.
+    # each shift, increments length and halves the coeff value until it is zero. 
+    # when zero is reached. loop exits and returns the minimum bit length needed to represent coefficient.
+    while coeff:
+        coeff //= 2
         len += 1
 
     return len
 
 def prepFileToInject(filedata: bytearray, filename: str) -> bytearray:
+
+    """
+    organises the secret file to a specific format before hiding inside the JPEG. 
+    filedata parameter is a bytearray - so it is mutable, originally it stores all the bytes in the file from start to end. 
+    this function adds the file size to the beginning of the file with 4 consecutive bytes (the division of total file size to 4 bits), then adds the file basename from the full path to the end.
+    this is done because the file size can be more than 255 - (the maximum byte value that can enter the bytearray), therefore it is divided to smaller chunks
+    """
+    # the file name is added the end of the file following a backslash. 
+    # this name will be used to name the file when extracting it back.
     filename = os.path.basename(filename)
     filedata.append(ord('/'))
 
-    for char in filename:
-        filedata.append(ord(char))
+    # every character in the file is converted to ASCII representations, by passing the unicode value of the character into the byterray. Unicode is the integer representation in ASCII.
+    for character in filename:
+        filedata.append(ord(character)) # ord() returns the unicode number of the character.
 
-    datasize = len(filedata) #len(filedata) cannot be 0.
-
+    datasize = len(filedata) 
+    # len(filedata) cannot be 0.
     if datasize < 0:
         raise ValueError(f'Secret file data size cannot be negative: {datasize}')
     else:
@@ -1237,24 +1339,31 @@ def prepFileToInject(filedata: bytearray, filename: str) -> bytearray:
             filedata.insert(0, _byte)
         return filedata
 
-def createHuffmanTable(huffman_table: HuffmanTable, type: str, component: str) -> None:
+def optimizeHuffmanTable(huffman_table: HuffmanTable, type: str, component: str) -> None:
 
     """
+    DECLARATION:
     The hardcoded data you see in this function is a standard. It does not differ.
     This must be the same because Huffman Table optimization must be done after the coefficients are altered.
-    Steganography makes the frequency distribution of Huffman symbols change, therefore original Huffman Table
-    data cannot be used to encode the altered coefficients.
+    Steganography alters AC coefficients. These coefficients will have different lenghts in bits, so their symbols will be different than the original symbols.
+    This changes the frequency distribution of symbols, meaning it will effect how the longer codes are assigned to rare occurring symbols and shorter codes will be assigned to more frequent symbols.
+    For that we MUST NOT encode the tampered data with the original Huffman tables.
 
-    For this reason new Huffman Tables must be created. This function does it so.
-    Values you see in the tables below are according to the JPEG standard.
+    For this reason new Huffman Tables must be created in this function. 
+    Values you see in the tables below are according to the Joint Photographic Experts Group (JFIF) standard. 
+    You can find it in Page 158, ANNEX K.3.3 in JFIF Specification by ITU T.81: https://www.w3.org/Graphics/JPEG/itu-t81.pdf
+
     """
-
+    # there can only be two types of huffman tables 'dc' or 'ac' anything else is rejected.
     if type != 'dc' and type != 'ac':
         raise RuntimeError("Huffman table type is not 'ac' or 'dc'.")
-    
+    # there can only be two channels, chroma or luma, anything else is rejected.
     if component != 'lum' and component != 'chr':
         raise RuntimeError("Component can be either 'lum' (luminance) or 'chr' (chrominance)")
     
+    # refering to dissertation, number of zeros preceding DC coefficients is always 0, so the upper 4 bits of the symbols is always 0.
+    # the lower 4 bits of the DC symbols - length of DC coefficients in bits, can be between 0 and 11, so only 12 possible symbols can represent DC symbols
+    # therefore dcSymbols array consists of only 12 Huffman symbols.
     dcSymbols = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B]
     acLuminanceSymbols = [
         0x01, 0x02, 0x03, 0x00, 0x04, 0x11,
@@ -1299,16 +1408,19 @@ def createHuffmanTable(huffman_table: HuffmanTable, type: str, component: str) -
         ,0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xF2, 0xF3
         ,0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA
     ]
-
+    # again since there are only 12 DC Huffman symbols, the remaining half are always 12.
     dcLuminanceOffsets = [0, 0, 1, 6, 7, 8, 9, 10, 11, 12, 12, 12, 12, 12, 12, 12, 12]
     dcChrominanceOffsets = [0, 0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 12, 12, 12, 12, 12]
+    # there are 162 possible Huffman symbols - refer to dissertation, so the ending entry in the offsets array is 162
     acLuminanceOffsets = [0, 0, 2, 3, 6, 9, 11, 15, 18, 23, 28, 32, 36, 36, 36, 37, 162]
     acChrominanceOffsets = [0, 0, 2, 3, 5, 9, 13, 16, 20, 27, 32, 36, 40, 40, 41, 43, 162]
 
+    # checks if the table type parameter is DC, if so populates the huffman table symbols with 12 huffman symbols. by iterating 12 times.
     if type == 'dc':
         for i in range(12):
             huffman_table.symbols[i] = dcSymbols[i]
         
+        # if color component the huffman table is used is luminance, the luminance offsets is used otherwise chrominance offsets is used.
         if component == 'lum':
             for i in range(17):
                 huffman_table.offsets[i] = dcLuminanceOffsets[i]
@@ -1316,19 +1428,27 @@ def createHuffmanTable(huffman_table: HuffmanTable, type: str, component: str) -
             for i in range(17):
                 huffman_table.offsets[i] = dcChrominanceOffsets[i]
     
+    # checks table type is AC
     if type == 'ac':
+        # if component is luminance
         if component == 'lum':
+            # populates the huffman table symbols with the possible standard huffman table values by iterating 162 times
             for i in range(162):
                 huffman_table.symbols[i] = acLuminanceSymbols[i]
+            # populates the offsets array with all AC luminance offsets
             for i in range(17):
                 huffman_table.offsets[i] = acLuminanceOffsets[i]
-
+        # if component is chrominance
         else:
+            # populates the huffman table with chrominance symbols
             for i in range(162):
                 huffman_table.symbols[i] = acChrominanceSymbols[i]
+            # populates the offsets array with chrominance offsets
             for i in range(17):
                 huffman_table.offsets[i] = acChrominanceOffsets[i]
 
+    # overwrites the huffman codes in the codes array of HuffmanTable object, with the new codes that will be created by the following function
+    # this is necessary, otherwise the encoding will attempt Huffman encoding with original image tables which we MUST avoid.
     generateHuffmanCodes(huffman_table) 
 
 def removeNameFromFileData(filedata: bytearray) -> str:
