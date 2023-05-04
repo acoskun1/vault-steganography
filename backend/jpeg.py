@@ -92,7 +92,7 @@ class StartOfFrame:
         self.numOfComponents = 0x00
         self.set = False
 
-#Component Class (Y'CbCr)
+# Colour Component Class (Y'CbCr)
 class Component:
     def __init__(self) -> None:
         self.identifier: int = 0
@@ -160,6 +160,8 @@ class Header:
         self.successiveApproxLow: int = 0
 
     def __str__(self) -> str:
+        
+        """FOR --meta-data OPTION, PRINTS THE JPEG INFORMATION IN JSON FORMAT"""
 
         #START OF FRAME
         startOfFramePrecision = self.startOfFrame.precision
@@ -342,11 +344,11 @@ class Header:
         length = 0
         curr = start
 
-        length = length | data[curr]
+        length |= data[curr]
         curr += 1
 
-        length = length << 8
-        length = length | data[curr]
+        length <<= 8
+        length |= data[curr]
         return length
 
     def readSOS(self, data: bytearray, start: int, len: int) -> None:
@@ -425,8 +427,8 @@ class Header:
         for i in range(self.startOfFrame.numOfComponents):
             header.append(self.components[i].identifier)
             j = self.components[i].dcHuffmanTableId
-            j = j << 4
-            j = j | self.components[i].acHuffmanTableId
+            j <<= 4
+            j |= self.components[i].acHuffmanTableId
             header.append(j)
         #3 bytes to be ignored
         header.append(0x00)
@@ -561,9 +563,9 @@ class Header:
 
         for i in range(self.startOfFrame.numOfComponents):
             data.append(self.components[i].identifier & 0xFF)
-            c = (self.components[i].horizontalSamplingFactor & 0x0F) << 4
-            c = c | (self.components[i].verticalSamplingFactor & 0x0F)
-            data.append(c)
+            x = (self.components[i].horizontalSamplingFactor & 0x0F) << 4
+            x |= (self.components[i].verticalSamplingFactor & 0x0F)
+            data.append(x)
             data.append(self.components[i].quantizationTableNumber & 0xFF)
 
     def readDHT(self, data: bytearray, start: int, len: int):
@@ -606,21 +608,21 @@ class Header:
             if hufftable.set:
                 raise ValueError('Error - Huffman table was assigned multiple times.')
 
-            allCodes = 0
+            allSymbols = 0
             # reading 16 bytes which represent codes of each length from 1 - 16 bits long.
             for j in range(1,17):
                 i += 1
                 # keeps total symbols by reading the next byte
-                allCodes += data[i]
+                allSymbols += data[i]
                 # use the current value of total symbols to set the next value in offsets array.
-                hufftable.offsets[j] = allCodes
+                hufftable.offsets[j] = allSymbols
 
             # reading next chunk of bytes which are all the symbols and store them in a straight line in the symbols array.
-            for j in range(allCodes):
+            for j in range(allSymbols):
                 i += 1
                 hufftable.symbols[j] = data[i]
 
-            hufftable.numberOfCodes = allCodes
+            hufftable.numberOfCodes = allSymbols
             hufftable.table_length = len
             hufftable.destination_id = tableId
             hufftable.set = True
@@ -628,6 +630,8 @@ class Header:
             i += 1
 
     def writeDHT(self, data: bytearray, table: int, id: int) -> None:
+        
+        """Writes the huffman table bytes to the bytearray during encoding."""
         
         #Add Huffman Table marker bytes (FFC4)
         data.append(0xFF)
@@ -640,8 +644,8 @@ class Header:
             data.append(0x1F)
 
         i = table
-        i = i << 4
-        i = i | (id & 0x0F)
+        i <<= 4
+        i |= (id & 0x0F)
         data.append(i)
         
         huffTable = None

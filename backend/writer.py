@@ -3,8 +3,6 @@ from typing import List
 class BitWriter:
     """
     Write bits one at a time to data array.
-    + __init__(self) -> None: 
-        Constructor method for the BitWriter class. Sets the initial value of the next_bit_ member to 0.
     + write_bit(bit) -> None:
         writes individual bit to the last byte always.
         takes the last byte by accessing index [-1] at bytestream.

@@ -35,7 +35,7 @@ Vault. v1.0 Apr 2023 By Ali Coskun
 def get_epilog() -> str:
     _local_tz = tz.tzlocal()
     _exec_at = datetime.now(tz=tz.UTC).astimezone(_local_tz)
-    _epilog_string = f' Last executed at: {_exec_at:%m/%d/%Y - %H:%M:%S, %Z%z}'
+    _epilog_string = f' Last executed at: {_exec_at:%d/%m/%Y - %H:%M:%S, %Z%z}'
     return _epilog_string
 
 parser = argparse.ArgumentParser(prog='vault', 
